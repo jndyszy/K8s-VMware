@@ -1,0 +1,23 @@
+# Calico 安装配置（Tigera Operator）—— 阶段 1
+# 节点在同一个二层网段，使用不封装的 BGP 直接路由
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    bgp: Enabled
+    ipPools:
+      - name: default-ipv4-ippool
+        cidr: 10.244.0.0/16          # 必须与 kubeadm podSubnet 一致
+        encapsulation: None          # 跨节点不通时改为 VXLANCrossSubnet
+        natOutgoing: Enabled
+        blockSize: 26
+        nodeSelector: all()
+---
+# 提供 projectcalico.org/v3 API，阶段 4 用 kubectl 直接管理 BGPPeer
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+spec: {}

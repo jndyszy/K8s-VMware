@@ -1,0 +1,35 @@
+# ===== 集群凭据 =====
+admin.conf
+*.kubeconfig
+kubeconfig
+# kubeadm-init.log 含 join token（gitignore 不支持行尾注释，注释必须单独一行）
+kubeadm-init.log
+join-command.sh
+
+# ===== 证书与私钥（公钥证书 .crt 可以提交，私钥绝对不行） =====
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ===== Terraform =====
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+.terraform.lock.hcl.bak
+
+# ===== 本地环境与密钥 =====
+.env
+.env.*
+!.env.example
+secrets/
+*.secret.yaml
+
+# ===== 杂项 =====
+.DS_Store
+*.swp
+.idea/
+.vscode/

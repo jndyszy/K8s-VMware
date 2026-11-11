@@ -1,0 +1,16 @@
+# 只允许 role=client 的 Pod 访问 web 的 80 端口
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-client-to-web
+  namespace: stage1-test
+spec:
+  podSelector:
+    matchLabels: { app: web }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { role: client }
+      ports:
+        - { protocol: TCP, port: 80 }

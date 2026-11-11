@@ -1,0 +1,23 @@
+# kubeadm 初始化配置（阶段 1）
+# kubernetesVersion 省略：默认与已安装的 kubeadm 版本一致
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 10.10.10.10
+  bindPort: 6443
+nodeRegistration:
+  name: k8s-master
+  criSocket: unix:///run/containerd/containerd.sock
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: k8s-vmware
+controlPlaneEndpoint: k8s-master:6443
+networking:
+  podSubnet: 10.244.0.0/16      # 必须与 platform/calico/installation.yaml 的 cidr 一致
+  serviceSubnet: 10.96.0.0/12
+  dnsDomain: cluster.local
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
