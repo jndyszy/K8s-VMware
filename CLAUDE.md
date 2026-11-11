@@ -17,7 +17,7 @@
 | --- | --- |
 | 宿主机 | macOS，Apple Silicon，所有虚拟机为 ARM64 |
 | 虚拟化 | VMware Fusion，自定义 NAT 网络 vmnet2 = 10.10.10.0/24，网关 10.10.10.2，Mac 为 10.10.10.1，无 DHCP |
-| k8s-master | 10.10.10.10，Ubuntu Server 24.04 ARM64 |
+| k8s-master | 10.10.10.10，Ubuntu Server 26.04 ARM64 |
 | k8s-worker-1/2/3 | 10.10.10.11 / .12 / .13 |
 | frr-router | 10.10.10.20，**OpenWrt**（不是 Ubuntu），单臂路由，只挂 vmnet2，不作为节点默认网关 |
 | Pod CIDR | 10.244.0.0/16（kubeadm podSubnet 与 Calico IPPool 必须一致） |
@@ -25,7 +25,7 @@
 | DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；阶段 4 起：OpenWrt dnsmasq 提供 `lab.internal` 区域，节点 DNS 主 10.10.10.20、备 10.10.10.2 |
 | LoadBalancer 池 | 10.200.0.0/24（MetalLB 只分配 IP，由 Calico BGP 宣告） |
 | BGP | 集群 AS 64512，OpenWrt/FRR AS 64500 |
-| 容器运行时 | containerd，SystemdCgroup = true，certs.d 目录式配置 |
+| 容器运行时 | containerd 2.x（Ubuntu 26.04 apt 自带），SystemdCgroup = true，certs.d 目录式配置；配置文件为 2.x 结构（pause 键名 `sandbox`，字符串用单引号），脚本需同时兼容 1.x |
 | CNI | Calico（Tigera Operator），BGP 直接路由，encapsulation: None |
 | 镜像仓库 | **公网** Harbor，域名访问，Let's Encrypt 证书（系统根证书即可信任，不分发 CA） |
 | Harbor 项目 | `lab`（业务镜像）、`charts`（Helm OCI）、`dockerhub-proxy`（Docker Hub 代理缓存） |

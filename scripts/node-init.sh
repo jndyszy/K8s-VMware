@@ -12,7 +12,7 @@
 #   3. 加载 overlay / br_netfilter，设置 sysctl
 #   4. 安装并配置 containerd（SystemdCgroup、certs.d）
 #   5. docker.io 镜像经 Harbor 的 dockerhub-proxy 项目代理缓存
-#   6. 安装并锁定 kubeadm / kubelet / kubectl
+#   6. 安装并锁定 kubeadm / kubelet / kubectl / cri-tools
 #   7. containerd 的 pause 镜像与 kubeadm 期望版本对齐
 #   8. 配置 crictl
 # 脚本可重复执行。
@@ -74,8 +74,9 @@ apt-get install -y -q containerd apt-transport-https ca-certificates curl gpg
 mkdir -p /etc/containerd /etc/containerd/certs.d
 containerd config default >/etc/containerd/config.toml
 sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-# containerd 1.x 默认 config_path = ""；2.x 默认已指向 certs.d，这条 sed 不会命中，属正常
-sed -i 's|config_path = ""|config_path = "/etc/containerd/certs.d"|' /etc/containerd/config.toml
+# config_path 默认为空：1.x 写作 ""，2.x 写作 ''（2.x 有 CRI 镜像插件和 transfer 服务两处，都要改）
+# 只改值为空的行，不碰 plugin_config_path 等其他键
+sed -ri "s#^([[:space:]]*)config_path = (\"\"|'')#\\1config_path = '/etc/containerd/certs.d'#" /etc/containerd/config.toml
 
 grep -q 'SystemdCgroup = true' /etc/containerd/config.toml \
   || die "SystemdCgroup 未能设置为 true，请手动检查 /etc/containerd/config.toml"
@@ -96,7 +97,8 @@ EOF
 systemctl restart containerd
 systemctl enable containerd >/dev/null
 
-containerd config dump 2>/dev/null | grep -q 'config_path = "/etc/containerd/certs.d' \
+# containerd 1.x 输出双引号，2.x（go-toml v2）输出单引号，用 . 匹配任一引号
+containerd config dump 2>/dev/null | grep -q 'config_path = ./etc/containerd/certs.d' \
   || die "config_path 未指向 /etc/containerd/certs.d，镜像代理不会生效"
 
 # ---------- 6. kubeadm / kubelet / kubectl ----------
@@ -107,9 +109,10 @@ curl -fsSL "https://pkgs.k8s.io/core:/stable:/${K8S_MINOR}/deb/Release.key" \
 echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${K8S_MINOR}/deb/ /" \
   >/etc/apt/sources.list.d/kubernetes.list
 apt-get update -q
-apt-mark unhold kubelet kubeadm kubectl >/dev/null 2>&1 || true
-apt-get install -y -q kubelet kubeadm kubectl
-apt-mark hold kubelet kubeadm kubectl >/dev/null
+# cri-tools 提供 crictl；新版 kubeadm 包不再依赖它，需显式安装
+apt-mark unhold kubelet kubeadm kubectl cri-tools >/dev/null 2>&1 || true
+apt-get install -y -q kubelet kubeadm kubectl cri-tools
+apt-mark hold kubelet kubeadm kubectl cri-tools >/dev/null
 systemctl enable kubelet >/dev/null
 
 # ---------- 7. pause 镜像 ----------
@@ -120,7 +123,7 @@ K8S_VERSION="$(kubeadm version -o short)"
 PAUSE_IMAGE="$(kubeadm config images list --kubernetes-version "$K8S_VERSION" 2>/dev/null | grep '/pause:' || true)"
 [[ -n "$PAUSE_IMAGE" ]] || die "无法从 kubeadm 获取 pause 镜像版本"
 sed -ri "s#^([[:space:]]*)(sandbox_image|sandbox) = .*#\\1\\2 = \"${PAUSE_IMAGE}\"#" /etc/containerd/config.toml
-grep -Eq "(sandbox_image|sandbox) = \"${PAUSE_IMAGE}\"" /etc/containerd/config.toml \
+grep -Eq "(sandbox_image|sandbox) = .${PAUSE_IMAGE}.[[:space:]]*$" /etc/containerd/config.toml \
   || die "pause 镜像未能设置为 ${PAUSE_IMAGE}，请手动检查 /etc/containerd/config.toml"
 systemctl restart containerd
 echo "    pause 镜像：${PAUSE_IMAGE}"
