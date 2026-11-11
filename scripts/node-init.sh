@@ -74,8 +74,9 @@ apt-get install -y -q containerd apt-transport-https ca-certificates curl gpg
 mkdir -p /etc/containerd /etc/containerd/certs.d
 containerd config default >/etc/containerd/config.toml
 sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-# containerd 1.x 默认 config_path = ""；2.x 默认已指向 certs.d，这条 sed 不会命中，属正常
-sed -i 's|config_path = ""|config_path = "/etc/containerd/certs.d"|' /etc/containerd/config.toml
+# config_path 默认为空：1.x 写作 ""，2.x 写作 ''（2.x 有 CRI 镜像插件和 transfer 服务两处，都要改）
+# 只改值为空的行，不碰 plugin_config_path 等其他键
+sed -ri "s#^([[:space:]]*)config_path = (\"\"|'')#\\1config_path = '/etc/containerd/certs.d'#" /etc/containerd/config.toml
 
 grep -q 'SystemdCgroup = true' /etc/containerd/config.toml \
   || die "SystemdCgroup 未能设置为 true，请手动检查 /etc/containerd/config.toml"
