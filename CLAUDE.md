@@ -22,6 +22,7 @@
 | frr-router | 10.10.10.20，**OpenWrt**（不是 Ubuntu），单臂路由，只挂 vmnet2，不作为节点默认网关 |
 | Pod CIDR | 10.244.0.0/16（kubeadm podSubnet 与 Calico IPPool 必须一致） |
 | Service CIDR | 10.96.0.0/12 |
+| DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；阶段 4 起：OpenWrt dnsmasq 提供 `lab.internal` 区域，节点 DNS 主 10.10.10.20、备 10.10.10.2 |
 | LoadBalancer 池 | 10.200.0.0/24（MetalLB 只分配 IP，由 Calico BGP 宣告） |
 | BGP | 集群 AS 64512，OpenWrt/FRR AS 64500 |
 | 容器运行时 | containerd，SystemdCgroup = true，certs.d 目录式配置 |
@@ -41,7 +42,7 @@ Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**不要把�
 - [ ] 阶段 1：kubeadm 集群、Calico、存储、DNS、NetworkPolicy
 - [ ] 阶段 2：lab-api、GitHub Actions、ArgoCD
 - [ ] 阶段 3：kube-prometheus-stack、告警、SLO
-- [ ] 阶段 4：OpenWrt + FRR 与 Calico eBGP、ECMP、网络自动化
+- [ ] 阶段 4：OpenWrt + FRR 与 Calico eBGP、ECMP、内部 DNS（lab.internal）、网络自动化
 - [ ] 阶段 5：Terraform 公有云
 
 完成一个阶段后，更新这里和 README 的进度表。
@@ -57,6 +58,11 @@ Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**不要把�
   BGP 监控没有现成 frr_exporter 包，计划用 Python 自写 exporter（SSH 执行 `vtysh -c 'show bgp summary json'`）。
 - **代码与配置分两个仓库**：CI 回写本仓库更新镜像 tag，不会反向触发 lab-api 的流水线。
 - **节点默认网关是 Fusion NAT（.2），不是 OpenWrt**：阶段 0–3 不依赖路由器。
+- **内部 DNS 只做增强，`/etc/hosts` 始终兜底**：`controlPlaneEndpoint` 是 `k8s-master:6443`，kubelet/kube-proxy 每次
+  重连都要解析它，DNS 一挂节点就 NotReady。所以节点名永远写在 `/etc/hosts`（nsswitch `files dns`，本地优先），
+  OpenWrt 的 dnsmasq 只提供额外名字（`*.lab.internal`，如 grafana/argocd 指向 LoadBalancer IP），上游转发 10.10.10.2；
+  节点 DNS 配主 .20、备 .2，路由器宕机时仍能解析公网。后缀用 `.internal`（ICANN 2024 年保留给内网），
+  不用 `.local`（被 mDNS 占用，macOS 解析会出问题）。
 
 ## 编码约定
 
