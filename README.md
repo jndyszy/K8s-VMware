@@ -7,7 +7,7 @@
 | 组件 | 说明 |
 | --- | --- |
 | 虚拟化 | VMware Fusion，自定义 NAT 网络 vmnet2（10.10.10.0/24） |
-| 节点 | Ubuntu Server 24.04 ARM64：k8s-master `.10`，k8s-worker-1/2/3 `.11-.13`；frr-router `.20` 为 OpenWrt |
+| 节点 | Ubuntu Server 26.04 ARM64：k8s-master `.10`，k8s-worker-1/2/3 `.11-.13`；frr-router `.20` 为 OpenWrt |
 | Kubernetes | kubeadm + containerd，Pod 10.244.0.0/16，Service 10.96.0.0/12 |
 | CNI | Calico，BGP 直接路由（AS 64512） |
 | 镜像仓库 | 公网 Harbor（Let's Encrypt），Docker Hub 代理缓存、Trivy 扫描、机器人账号 |

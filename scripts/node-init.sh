@@ -96,7 +96,8 @@ EOF
 systemctl restart containerd
 systemctl enable containerd >/dev/null
 
-containerd config dump 2>/dev/null | grep -q 'config_path = "/etc/containerd/certs.d' \
+# containerd 1.x 输出双引号，2.x（go-toml v2）输出单引号，用 . 匹配任一引号
+containerd config dump 2>/dev/null | grep -q 'config_path = ./etc/containerd/certs.d' \
   || die "config_path 未指向 /etc/containerd/certs.d，镜像代理不会生效"
 
 # ---------- 6. kubeadm / kubelet / kubectl ----------
@@ -120,7 +121,7 @@ K8S_VERSION="$(kubeadm version -o short)"
 PAUSE_IMAGE="$(kubeadm config images list --kubernetes-version "$K8S_VERSION" 2>/dev/null | grep '/pause:' || true)"
 [[ -n "$PAUSE_IMAGE" ]] || die "无法从 kubeadm 获取 pause 镜像版本"
 sed -ri "s#^([[:space:]]*)(sandbox_image|sandbox) = .*#\\1\\2 = \"${PAUSE_IMAGE}\"#" /etc/containerd/config.toml
-grep -Eq "(sandbox_image|sandbox) = \"${PAUSE_IMAGE}\"" /etc/containerd/config.toml \
+grep -Eq "(sandbox_image|sandbox) = .${PAUSE_IMAGE}.[[:space:]]*$" /etc/containerd/config.toml \
   || die "pause 镜像未能设置为 ${PAUSE_IMAGE}，请手动检查 /etc/containerd/config.toml"
 systemctl restart containerd
 echo "    pause 镜像：${PAUSE_IMAGE}"

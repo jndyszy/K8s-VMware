@@ -26,9 +26,9 @@ check "machine-id 非空"               bash -c '[[ -s /etc/machine-id ]]'
 echo "== containerd =="
 check "containerd 运行中"             systemctl is-active --quiet containerd
 check "SystemdCgroup = true"          grep -q 'SystemdCgroup = true' /etc/containerd/config.toml
-check "config_path 指向 certs.d"      bash -c 'containerd config dump | grep -q "config_path = \"/etc/containerd/certs.d"'
+check "config_path 指向 certs.d"      bash -c 'containerd config dump | grep -q "config_path = ./etc/containerd/certs.d"'
 check "docker.io 代理 hosts.toml 存在" test -f /etc/containerd/certs.d/docker.io/hosts.toml
-check "pause 镜像与 kubeadm 期望一致"  bash -c 'p=$(kubeadm config images list --kubernetes-version "$(kubeadm version -o short)" 2>/dev/null | grep /pause:) && [[ -n $p ]] && grep -Eq "(sandbox_image|sandbox) = \"$p\"" /etc/containerd/config.toml'
+check "pause 镜像与 kubeadm 期望一致"  bash -c 'p=$(kubeadm config images list --kubernetes-version "$(kubeadm version -o short)" 2>/dev/null | grep /pause:) && [[ -n $p ]] && grep -Eq "(sandbox_image|sandbox) = .$p.[[:space:]]*$" /etc/containerd/config.toml'
 
 echo "== Kubernetes 组件 =="
 check "kubeadm 已安装"                command -v kubeadm
