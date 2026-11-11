@@ -34,6 +34,7 @@ echo "== Kubernetes 组件 =="
 check "kubeadm 已安装"                command -v kubeadm
 check "kubelet 已安装"                command -v kubelet
 check "kubelet 已 enable"             systemctl is-enabled --quiet kubelet
+check "crictl 已安装"                 command -v crictl
 
 echo "== 网络与 Harbor =="
 check "解析 ${HARBOR_HOST}"           getent hosts "${HARBOR_HOST}"

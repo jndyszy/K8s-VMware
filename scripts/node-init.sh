@@ -12,7 +12,7 @@
 #   3. 加载 overlay / br_netfilter，设置 sysctl
 #   4. 安装并配置 containerd（SystemdCgroup、certs.d）
 #   5. docker.io 镜像经 Harbor 的 dockerhub-proxy 项目代理缓存
-#   6. 安装并锁定 kubeadm / kubelet / kubectl
+#   6. 安装并锁定 kubeadm / kubelet / kubectl / cri-tools
 #   7. containerd 的 pause 镜像与 kubeadm 期望版本对齐
 #   8. 配置 crictl
 # 脚本可重复执行。
@@ -109,9 +109,10 @@ curl -fsSL "https://pkgs.k8s.io/core:/stable:/${K8S_MINOR}/deb/Release.key" \
 echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${K8S_MINOR}/deb/ /" \
   >/etc/apt/sources.list.d/kubernetes.list
 apt-get update -q
-apt-mark unhold kubelet kubeadm kubectl >/dev/null 2>&1 || true
-apt-get install -y -q kubelet kubeadm kubectl
-apt-mark hold kubelet kubeadm kubectl >/dev/null
+# cri-tools 提供 crictl；新版 kubeadm 包不再依赖它，需显式安装
+apt-mark unhold kubelet kubeadm kubectl cri-tools >/dev/null 2>&1 || true
+apt-get install -y -q kubelet kubeadm kubectl cri-tools
+apt-mark hold kubelet kubeadm kubectl cri-tools >/dev/null
 systemctl enable kubelet >/dev/null
 
 # ---------- 7. pause 镜像 ----------
