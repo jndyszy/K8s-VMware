@@ -30,7 +30,7 @@
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| 0 | 模板机、containerd、Harbor 接入、Docker Hub 代理缓存（[手册](docs/stage0-template.md)） | 🔄 模板机验收通过，待克隆 |
+| 0 | 模板机、containerd、Harbor 接入、Docker Hub 代理缓存（[手册](docs/stage0-template.md)） | ✅ |
 | 1 | kubeadm 集群、Calico、存储、DNS、NetworkPolicy | ⬜ |
 | 2 | Go 服务 lab-api、GitHub Actions、Harbor、ArgoCD GitOps | ⬜ |
 | 3 | kube-prometheus-stack、告警、SLI/SLO、错误预算 | ⬜ |
@@ -62,7 +62,7 @@ CLAUDE.md                   # 给 Claude Code 的项目上下文
 
 ## 快速开始（阶段 0–1）
 
-**前置**：Harbor 已建好 `dockerhub-proxy`（Proxy Cache → Docker Hub）项目和只读机器人账号 `robot$k8s-pull`；Mac 上已安装 `kubectl`、`helm`。
+**前置**：Harbor 已建好 `dockerhub-proxy` 项目（**公开**，创建时打开「镜像代理」并关联 Docker Hub）和只读机器人账号 `robot$k8s-pull`；Mac 上已安装 `kubectl`、`helm`。
 
 ```bash
 # ---- 模板机（root）----
@@ -71,8 +71,11 @@ export HARBOR_HOST=harbor.example.com          # 换成你的 Harbor 域名
 ./scripts/verify-node.sh
 # 关机 → 快照 base-ready → 克隆 4 台
 
-# ---- 每台克隆机（root）----
+# ---- 每台克隆机（root，一次只开一台）----
+# 克隆机拿不到 IP（安装程序的 netplan 绑定了模板机 MAC），先在控制台临时配置：
+#   ip addr add 10.10.10.10/24 dev enp2s0 && ip route add default via 10.10.10.2
 ./scripts/clone-setup.sh k8s-master   10.10.10.10   # 依次 worker-1/2/3 → .11/.12/.13
+# 重启后在 Mac 上 ssh-keygen -R <IP>（SSH 主机密钥已重新生成）
 
 # ---- k8s-master（root）----
 CALICO_VER=v3.33.0 ./scripts/master-init.sh         # 版本以 Calico 官网为准

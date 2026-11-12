@@ -32,13 +32,14 @@
 | Harbor 账号 | `robot$lab-ci`（CI 推送）、`robot$k8s-pull`（集群只读） |
 | CI | GitHub Actions，`ubuntu-24.04-arm` 托管 Runner，不在集群里跑 Runner |
 | CD | ArgoCD，监听本仓库 `apps/` |
+| 节点访问 | Mac 上 `ssh k8s-master` / `k8s-worker-1..3` 直接以 root 登录（`~/.ssh/config` 别名 + 实验专用密钥 `~/.ssh/id_ed25519_k8slab`）；节点网卡名 `enp2s0`；每台节点 `/root/K8s-VMware` 为本仓库副本 |
 | 仓库 | 本仓库 K8s-VMware = 基础设施与 GitOps；Go 服务另建仓库 lab-api |
 
 Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**不要把真实域名写死进仓库文件**。
 
 ## 当前进度
 
-- [ ] 阶段 0：模板机、containerd、Harbor 接入
+- [x] 阶段 0：模板机、containerd、Harbor 接入（4 台节点 verify-node.sh 均 19/19，见 docs/stage0-template.md）
 - [ ] 阶段 1：kubeadm 集群、Calico、存储、DNS、NetworkPolicy
 - [ ] 阶段 2：lab-api、GitHub Actions、ArgoCD
 - [ ] 阶段 3：kube-prometheus-stack、告警、SLO
