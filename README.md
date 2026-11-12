@@ -31,7 +31,7 @@
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | 0 | 模板机、containerd、Harbor 接入、Docker Hub 代理缓存（[手册](docs/stage0-template.md)） | ✅ |
-| 1 | kubeadm 集群、Calico、存储、DNS、NetworkPolicy | ⬜ |
+| 1 | kubeadm 集群、Calico、存储、DNS、NetworkPolicy（[手册](docs/stage1-cluster.md)） | ✅ |
 | 2 | Go 服务 lab-api、GitHub Actions、Harbor、ArgoCD GitOps | ⬜ |
 | 3 | kube-prometheus-stack、告警、SLI/SLO、错误预算 | ⬜ |
 | 4 | OpenWrt/FRR + Calico BGP、LoadBalancer IP 宣告、内部 DNS、网络自动化 | ⬜ |
@@ -55,7 +55,7 @@
 ├── apps/                   # ArgoCD 管理的应用（阶段 2）
 ├── network/                # OpenWrt/FRR 配置与网络自动化（阶段 4）
 ├── terraform/              # 阶段 5
-└── docs/                   # 实验手册（stage0-template.md …）、复盘、截图
+└── docs/                   # 实验手册（stage0-template.md、stage1-cluster.md …）、复盘、截图
 
 CLAUDE.md                   # 给 Claude Code 的项目上下文
 ```
