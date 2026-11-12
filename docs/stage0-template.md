@@ -163,6 +163,65 @@ EOF
 
 - **作用**：告诉 crictl 去哪个 socket 找 containerd。之后可以用 `crictl ps`、`crictl images`、`crictl logs` 绕过 K8s 直接查看容器，排查 kubelet 起不来之类的问题。
 
+## 9. 克隆 4 台节点
+
+模板机验收通过后关机，在 Fusion 中打快照 `base-ready`，再**完整克隆**（不是链接克隆）4 台。克隆机与模板机有 4 样东西完全相同，必须逐台改掉：
+
+| 要改的 | 不改的后果 |
+| --- | --- |
+| IP | 4 台都是 `10.10.10.100`，同时开机地址冲突 |
+| 主机名 | K8s 用主机名作节点名，重名无法加入集群 |
+| machine-id | kubeadm / systemd 用它区分机器，重复会导致各种难查的问题 |
+| SSH 主机密钥 | 4 台共用一把私钥，相当于多台设备共用同一张证书 |
+
+[`scripts/clone-setup.sh`](../scripts/clone-setup.sh) 一次改完这 4 项，并禁止 cloud-init 接管网络配置。**一次只开一台**，做完一台再开下一台：
+
+1. **Fusion 控制台**：克隆机开机后拿不到 IP（原因见踩坑 4），先临时配地址：
+
+   ```bash
+   ip addr add 10.10.10.10/24 dev enp2s0
+   ip route add default via 10.10.10.2
+   ```
+
+   临时地址没有配置 DNS，此时 `git pull` 会失败；不需要拉代码，模板机上已有仓库。
+
+2. **Mac**：SSH 登录后执行脚本并重启：
+
+   ```bash
+   ssh -t <用户名>@10.10.10.10 "sudo /root/K8s-VMware/scripts/clone-setup.sh k8s-master 10.10.10.10 && sudo reboot"
+   ```
+
+3. **Mac**：脚本重新生成了 SSH 主机密钥，先清掉旧记录再登录：
+
+   ```bash
+   ssh-keygen -R 10.10.10.10
+   ```
+
+依次对 `k8s-worker-1/2/3` → `.11/.12/.13` 重复以上步骤。
+
+### Mac 免密登录节点
+
+为日常运维和自动化，Mac 上生成一把实验专用密钥，授权给每台节点的 root：
+
+```bash
+ssh-keygen -t ed25519 -N "" -C "k8s-vmware-lab" -f ~/.ssh/id_ed25519_k8slab
+```
+
+`~/.ssh/config` 中为 4 台节点配置别名，之后可直接 `ssh k8s-master`：
+
+```text
+Host k8s-master
+  HostName 10.10.10.10
+# k8s-worker-1/2/3 同理 → .11/.12/.13
+Host k8s-master k8s-worker-1 k8s-worker-2 k8s-worker-3 10.10.10.*
+  User root
+  IdentityFile ~/.ssh/id_ed25519_k8slab
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+```
+
+把公钥追加到每台节点的 `/root/.ssh/authorized_keys`（权限 `700` / `600`）。Ubuntu 默认 `PermitRootLogin prohibit-password`：允许 root 用密钥登录，禁止用密码登录。
+
 ## 踩坑记录
 
 1. **containerd 2.x 配置格式变化**：Ubuntu 26.04 自带 containerd 2.2，`config.toml` 的字符串用单引号，`config_path` 默认是 `''`，pause 键名改为 `sandbox`。按 1.x 写的 `sed 's|config_path = ""|...|'` 一行都没改到，而且不报错；结果 `hosts.toml` 不生效。修复：sed 同时匹配两种引号，检查脚本也不再假设双引号。
@@ -171,6 +230,9 @@ EOF
    - 定位方法：模拟 containerd 匿名取 token 后请求 manifest，404 = 未开启代理，401 = 项目非公开，5xx = Harbor 连不上 Docker Hub。
    - 确认方法：Harbor 日志中出现 `harbor#proxy-cache-service` 的 push 记录（回源缓存）和 `anonymous` 的 pull 记录（节点拉取）。
    - 改进：`verify-node.sh` 新增「Harbor 代理缓存可回源 Docker Hub」检查，直接请求 manifest，不再只看 `crictl pull` 是否成功。
+4. **克隆机没有 IPv4 地址**：网卡 `UP`，却只有 IPv6 链路本地地址。原因是 Ubuntu 安装程序（subiquity）生成的 `/etc/netplan/50-cloud-init.yaml` 用 `match: macaddress:` 绑定了模板机网卡的 MAC 地址；Fusion 完整克隆会生成新 MAC，配置匹配不上就被跳过。
+   - 网络类比：配置绑在了板卡序列号上，换一块同型号板卡，配置不会自动套上。
+   - 修复：`clone-setup.sh` 把安装程序生成的 netplan 文件移到 `/etc/netplan/backup/`，重新写一份**按网卡名**（`enp2s0`）匹配的静态配置，克隆后不受 MAC 变化影响。
 
 ## 验收
 
@@ -178,7 +240,19 @@ EOF
 HARBOR_HOST=harbor.example.com ./scripts/verify-node.sh
 ```
 
-模板机实测结果：19 通过，0 失败。
+模板机与 4 台克隆节点实测结果均为 19 通过，0 失败。
+
+克隆后的节点另外确认：
+
+| 节点 | IP | machine-id / product_uuid | 结果 |
+| --- | --- | --- | --- |
+| k8s-master | 10.10.10.10 | 互不重复 | ✅ |
+| k8s-worker-1 | 10.10.10.11 | 互不重复 | ✅ |
+| k8s-worker-2 | 10.10.10.12 | 互不重复 | ✅ |
+| k8s-worker-3 | 10.10.10.13 | 互不重复 | ✅ |
+
+- 每台都能按主机名 ping 通其余 3 台及网关 `10.10.10.2`，DNS 能解析公网域名。
+- 每台只有一份 `50-static.yaml`，不含 MAC 匹配；cloud-init 网络管理已禁用，重启后 IP 保持。
 
 | 分组 | 检查项 |
 | --- | --- |
@@ -189,6 +263,5 @@ HARBOR_HOST=harbor.example.com ./scripts/verify-node.sh
 
 ## 下一步
 
-1. 模板机关机，在 Fusion 中打快照 `base-ready`。
-2. 完整克隆 4 台，每台执行 `./scripts/clone-setup.sh <主机名> <IP>`：重置 machine-id 与 SSH 主机密钥、设置主机名和静态 IP。
-3. 进入阶段 1：在 k8s-master 上执行 `scripts/master-init.sh`。
+1. 4 台节点各打快照 `stage0-done`：阶段 1 的 `kubeadm init` 出问题时可直接回滚，不必 `kubeadm reset`。
+2. 进入阶段 1：在 k8s-master 上执行 `scripts/master-init.sh`。
