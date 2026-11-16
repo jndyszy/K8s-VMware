@@ -230,7 +230,7 @@ kubectl -n kube-system rollout restart deploy/coredns
 ## 改进项
 
 - [ ] ArgoCD 改为 GitHub Webhook 触发，替代 3 分钟轮询（需要从公网可达，阶段 5 或经隧道）。
-- [ ] lab-api 补单元测试，CI 中 `go test` 目前没有测试用例。
+- [x] lab-api 补单元测试（阶段 3 随故障注入一起补了 6 个）。
 - [ ] 镜像签名（cosign）与 Harbor 漏洞扫描门禁：高危漏洞阻止部署。
 - [ ] 部署密钥定期轮换。
 
