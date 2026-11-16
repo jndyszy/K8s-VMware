@@ -3,8 +3,6 @@
 rule_files:
   - slo-rules.prom.yaml
 evaluation_interval: 30s
-# 浮点数近似比较：1 - 0.98 = 0.020000000000000018 这类二进制浮点误差不算失败
-fuzzy_compare: true
 tests:
   # 两个副本，每分钟各 100 个请求，其中 pod-a 每分钟 2 个 500 → 错误率 2/200 = 1%
   - interval: 1m
@@ -31,16 +29,18 @@ tests:
         exp_samples:
           - labels: 'lab_api:http_error_ratio:rate5m'
             value: 0.01
-      - expr: lab_api:http_slow_ratio:rate5m
+      # 1 - 0.98 在二进制浮点下是 0.020000000000000018，先 round 到 0.001 再比较；
+      # round() 会去掉指标名，所以期望的标签是空集合 {}
+      - expr: round(lab_api:http_slow_ratio:rate5m, 0.001)
         eval_time: 30m
         exp_samples:
-          - labels: 'lab_api:http_slow_ratio:rate5m'
+          - labels: '{}'
             value: 0.02
       # 错误率 1%，预算 0.5% → 剩余 1 - 0.01/0.005 = -1（超支一倍）
-      - expr: lab_api:error_budget_remaining:availability_30d
+      - expr: round(lab_api:error_budget_remaining:availability_30d, 0.001)
         eval_time: 60m
         exp_samples:
-          - labels: 'lab_api:error_budget_remaining:availability_30d'
+          - labels: '{}'
             value: -1
       - expr: lab_api:slo_availability:target
         eval_time: 1m
