@@ -3,6 +3,8 @@
 rule_files:
   - slo-rules.prom.yaml
 evaluation_interval: 30s
+# 浮点数近似比较：1 - 0.98 = 0.020000000000000018 这类二进制浮点误差不算失败
+fuzzy_compare: true
 tests:
   # 两个副本，每分钟各 100 个请求，其中 pod-a 每分钟 2 个 500 → 错误率 2/200 = 1%
   - interval: 1m
