@@ -31,12 +31,13 @@
 | Harbor 项目 | `lab`（业务镜像）、`charts`（Helm OCI）、`dockerhub-proxy`（Docker Hub 代理缓存） |
 | Harbor 账号 | `robot$lab-ci`（CI 推送）、`robot$k8s-pull`（集群只读） |
 | CI | GitHub Actions，`ubuntu-24.04-arm` 托管 Runner，不在集群里跑 Runner |
-| CD | ArgoCD，监听本仓库 `apps/` |
+| CD | ArgoCD，监听本仓库 `apps/`；Application 定义在 `platform/argocd/`；镜像 tag 由各应用 `kustomization.yaml` 的 `images.newTag` 决定 |
 | 节点访问 | Mac 上 `ssh k8s-master` / `k8s-worker-1..3` 直接以 root 登录（`~/.ssh/config` 别名 + 实验专用密钥 `~/.ssh/id_ed25519_k8slab`）；节点网卡名 `enp2s0`；每台节点 `/root/K8s-VMware` 为本仓库副本 |
 | 外网依赖 | 节点经 Fusion NAT 出网，DNS 最终由 Mac 上的代理软件以 fake-ip 模式应答（公网域名解析为 198.18.0.0/15）；Mac 代理关闭时拉镜像、访问 Harbor 会失败 |
 | 仓库 | 本仓库 K8s-VMware = 基础设施与 GitOps；Go 服务另建仓库 lab-api |
 
-Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**不要把真实域名写死进仓库文件**。
+Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**脚本、文档、测试资源里不要写死真实域名**（文档统一写 `harbor.example.com`）。
+例外：`apps/` 下由 ArgoCD 部署的清单必须写出真实镜像地址（GitOps 的清单即集群实际运行内容），允许出现真实域名。
 
 ## 当前进度
 

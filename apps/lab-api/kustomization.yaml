@@ -1,0 +1,10 @@
+# lab-api 部署入口（阶段 2）：ArgoCD 监听本目录，CI 通过修改 images.newTag 发布新版本
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: lab
+resources:
+  - deployment.yaml
+  - service.yaml
+images:
+  - name: harbor.jndys.xyz/lab/lab-api
+    newTag: 41c582f

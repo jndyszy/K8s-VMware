@@ -1,0 +1,10 @@
+# lab-api Service（阶段 2）：集群内访问 http://lab-api.lab
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-api
+  labels: { app: lab-api }
+spec:
+  selector: { app: lab-api }
+  ports:
+    - { name: http, port: 80, targetPort: http }
