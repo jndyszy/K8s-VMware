@@ -62,9 +62,10 @@ grafana:
   sidecar:
     dashboards:
       searchNamespace: ALL
+  # 实测 Grafana 13 空载约 250Mi，256Mi 上限会被 OOMKilled；给到 512Mi
   resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { memory: 256Mi }
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 512Mi }
 
 # ---- 其余组件 ----
 prometheusOperator:
