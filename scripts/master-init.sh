@@ -66,6 +66,12 @@ kubectl get tigerastatus || true
 [[ $calico_ready -eq 1 ]] \
   || die "Calico 10 分钟内未就绪：kubectl get tigerastatus calico -o yaml；kubectl -n calico-system get pod"
 
+log "CoreDNS 上游改为各节点 systemd-resolved（规避 Fusion DNS 不支持 EDNS）"
+kubectl apply --server-side --force-conflicts -f "${REPO_ROOT}/platform/coredns/configmap.yaml"
+kubectl -n kube-system rollout restart deploy/coredns
+kubectl -n kube-system rollout status deploy/coredns --timeout=120s \
+  || die "CoreDNS 重启后未就绪：kubectl -n kube-system get pod -l k8s-app=kube-dns"
+
 log "生成 Worker join 命令 -> /root/join-command.sh"
 kubeadm token create --print-join-command >/root/join-command.sh
 chmod 600 /root/join-command.sh

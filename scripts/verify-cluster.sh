@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# verify-cluster.sh —— 阶段 1 验收，在 Mac 上执行
-#   节点 Ready、跨节点 Pod 通信、DNS、Service、NetworkPolicy、StorageClass
+# verify-cluster.sh —— 阶段 1 验收，在 Mac 或 k8s-master 上执行
+#   节点 Ready、跨节点 Pod 通信、DNS（含 EDNS 外部解析）、Service、NetworkPolicy、StorageClass
 #
 # 用法（在仓库根目录）：
 #   HARBOR_HOST=harbor.example.com ./scripts/verify-cluster.sh
@@ -14,6 +14,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 T="${REPO_ROOT}/tests/stage1"
 NS=stage1-test
+DIG_IMAGE="${DIG_IMAGE:-nicolaka/netshoot:v0.16}"
 
 pass=0; fail=0
 ok()  { printf '  \033[32m[PASS]\033[0m %s\n' "$1"; pass=$((pass+1)); }
@@ -52,6 +53,10 @@ kubectl -n "$NS" delete networkpolicy --all >/dev/null 2>&1 || true
 kubectl -n "$NS" wait --for=condition=Ready pod/pod-a pod/pod-b --timeout=180s >/dev/null \
   || bad "测试 Pod 未就绪（检查镜像拉取：kubectl -n ${NS} describe pod pod-a）"
 kubectl -n "$NS" rollout status deploy/web --timeout=180s >/dev/null || bad "web Deployment 未就绪"
+# dig 默认带 EDNS，模拟 Go 程序（如 ArgoCD）的解析行为；busybox 的 nslookup 不带 EDNS，测不出问题
+kubectl -n "$NS" run dnstest --image="$DIG_IMAGE" --restart=Never --command -- sleep 3600 >/dev/null 2>&1 || true
+kubectl -n "$NS" wait --for=condition=Ready pod/dnstest --timeout=180s >/dev/null \
+  || bad "dnstest Pod 未就绪（镜像 ${DIG_IMAGE}）"
 
 IP_B=$(kubectl -n "$NS" get pod pod-b -o jsonpath='{.status.podIP}')
 echo "  pod-a@k8s-worker-1 -> pod-b@k8s-worker-2 (${IP_B})"
@@ -60,6 +65,10 @@ echo "== 网络 =="
 expect_ok "跨节点 Pod 互通（ping）"           kx pod-a -- ping -c 3 -W 2 "$IP_B"
 expect_ok "集群 DNS：kubernetes.default"       kx pod-a -- nslookup kubernetes.default.svc.cluster.local
 expect_ok "外部 DNS：${HARBOR_HOST}"           kx pod-a -- nslookup "$HARBOR_HOST"
+expect_ok "CoreDNS 上游不是 /etc/resolv.conf" \
+  bash -c '! kubectl -n kube-system get cm coredns -o jsonpath="{.data.Corefile}" | grep -q "forward \. /etc/resolv.conf"'
+expect_ok "外部 DNS（带 EDNS）：github.com" \
+  bash -c "kubectl -n $NS exec dnstest -- dig +short +time=3 +tries=2 github.com A | grep -qE '^[0-9]+\.'"
 expect_ok "Service 访问：web"                  kx pod-a -- wget -q -T 3 -O /dev/null http://web
 
 echo "== NetworkPolicy =="

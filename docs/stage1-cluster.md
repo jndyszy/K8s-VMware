@@ -227,6 +227,8 @@ kubectl -n stage1-test exec pod-a -- nslookup harbor.example.com
 
 集群内名字由 CoreDNS（Service IP `10.96.0.10`）直接回答；集群外名字由 CoreDNS 转发给节点 DNS `10.10.10.2`。
 
+> 阶段 2 发现 Fusion 的 DNS 不支持 EDNS，busybox 的 `nslookup` 不带 EDNS 所以这里测不出来；CoreDNS 上游已改为各节点上的 systemd-resolved，见 [阶段 2 踩坑 2](stage2-gitops.md#2-fusion-nat-的-dns-不支持-edns)。
+
 ### 11.3 Service 访问
 
 ```bash

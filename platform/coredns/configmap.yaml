@@ -1,0 +1,41 @@
+# CoreDNS 配置（阶段 2）：上游改为各节点 IP 上的 systemd-resolved
+#
+# 原因：Fusion NAT 的 DNS（10.10.10.2）收到带 EDNS 的查询会返回畸形报文、且不支持 TCP。
+# kubeadm 默认 `forward . /etc/resolv.conf` 会让 CoreDNS 直接问 10.10.10.2，Go 程序（如 ArgoCD，
+# Go 1.21 起默认带 EDNS0）解析外部域名失败。systemd-resolved 遇到畸形应答会自动降级重试，
+# 所以让每台节点的 resolved 在节点 IP 上监听（clone-setup.sh 配置 DNSStubListenerExtra），
+# CoreDNS 转发给 4 台节点，并对上游做健康检查。
+#
+# 应用：kubectl apply --server-side --force-conflicts -f platform/coredns/configmap.yaml
+#       kubectl -n kube-system rollout restart deploy/coredns
+# 注意：kubeadm upgrade 可能把 Corefile 重置为默认值，升级后需重新应用本文件。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health {
+           lameduck 5s
+        }
+        ready
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+           pods insecure
+           fallthrough in-addr.arpa ip6.arpa
+           ttl 30
+        }
+        prometheus :9153
+        forward . 10.10.10.10 10.10.10.11 10.10.10.12 10.10.10.13 {
+           max_concurrent 1000
+        }
+        cache 30 {
+           disable success cluster.local
+           disable denial cluster.local
+        }
+        loop
+        reload
+        loadbalance
+    }
