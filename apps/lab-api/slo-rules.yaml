@@ -138,3 +138,121 @@ spec:
           expr: 1 - lab_api:http_error_ratio:rate30d / (1 - 0.995)
         - record: lab_api:error_budget_remaining:latency_30d
           expr: 1 - lab_api:http_slow_ratio:rate30d / (1 - 0.99)
+    # ---- 告警：多窗口、多燃烧率（Google SRE Workbook 第 5 章）----
+    # 长窗口和短窗口同时超标才告警：长窗口过滤偶发抖动，短窗口保证问题还在持续；
+    # 故障修复后短窗口很快回落，告警随之解除，不会在故障结束后还持续一个小时。
+    # 阈值 = 燃烧率 × (1 - SLO)，燃烧率 1 表示 30 天正好用完预算。
+    - name: lab-api-slo-alerts
+      rules:
+        - alert: LabApiAvailabilityBudgetBurnFast
+          expr: |
+            lab_api:http_error_ratio:rate1h > (14.4 * 0.005)
+            and
+            lab_api:http_error_ratio:rate5m > (14.4 * 0.005)
+          for: 2m
+          labels:
+            severity: critical
+            slo: availability
+            service: lab-api
+          annotations:
+            summary: "lab-api availability 错误预算燃烧过快（1h/5m 燃烧率 > 14.4）"
+            description: "错误率在 1h 窗口为 {{ $value | humanizePercentage }}，SLO 允许 0.5%。1 小时消耗约 2% 的 30 天错误预算，约 2 天会全部用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
+        - alert: LabApiAvailabilityBudgetBurnMedium
+          expr: |
+            lab_api:http_error_ratio:rate6h > (6 * 0.005)
+            and
+            lab_api:http_error_ratio:rate30m > (6 * 0.005)
+          for: 15m
+          labels:
+            severity: critical
+            slo: availability
+            service: lab-api
+          annotations:
+            summary: "lab-api availability 错误预算燃烧过快（6h/30m 燃烧率 > 6）"
+            description: "错误率在 6h 窗口为 {{ $value | humanizePercentage }}，SLO 允许 0.5%。6 小时消耗约 5% 的 30 天错误预算，约 5 天会全部用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
+        - alert: LabApiAvailabilityBudgetBurnSlow
+          expr: |
+            lab_api:http_error_ratio:rate1d > (3 * 0.005)
+            and
+            lab_api:http_error_ratio:rate2h > (3 * 0.005)
+          for: 1h
+          labels:
+            severity: warning
+            slo: availability
+            service: lab-api
+          annotations:
+            summary: "lab-api availability 错误预算燃烧过快（1d/2h 燃烧率 > 3）"
+            description: "错误率在 1d 窗口为 {{ $value | humanizePercentage }}，SLO 允许 0.5%。1 天消耗约 10% 的 30 天错误预算，约 10 天会全部用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
+        - alert: LabApiAvailabilityBudgetBurnTrend
+          expr: |
+            lab_api:http_error_ratio:rate3d > (1 * 0.005)
+            and
+            lab_api:http_error_ratio:rate6h > (1 * 0.005)
+          for: 3h
+          labels:
+            severity: warning
+            slo: availability
+            service: lab-api
+          annotations:
+            summary: "lab-api availability 错误预算燃烧过快（3d/6h 燃烧率 > 1）"
+            description: "错误率在 3d 窗口为 {{ $value | humanizePercentage }}，SLO 允许 0.5%。按当前速度，30 天周期结束时预算正好用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
+        - alert: LabApiLatencyBudgetBurnFast
+          expr: |
+            lab_api:http_slow_ratio:rate1h > (14.4 * 0.01)
+            and
+            lab_api:http_slow_ratio:rate5m > (14.4 * 0.01)
+          for: 2m
+          labels:
+            severity: critical
+            slo: latency
+            service: lab-api
+          annotations:
+            summary: "lab-api latency 错误预算燃烧过快（1h/5m 燃烧率 > 14.4）"
+            description: "慢请求（>250ms）占比在 1h 窗口为 {{ $value | humanizePercentage }}，SLO 允许 1%。1 小时消耗约 2% 的 30 天错误预算，约 2 天会全部用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
+        - alert: LabApiLatencyBudgetBurnMedium
+          expr: |
+            lab_api:http_slow_ratio:rate6h > (6 * 0.01)
+            and
+            lab_api:http_slow_ratio:rate30m > (6 * 0.01)
+          for: 15m
+          labels:
+            severity: critical
+            slo: latency
+            service: lab-api
+          annotations:
+            summary: "lab-api latency 错误预算燃烧过快（6h/30m 燃烧率 > 6）"
+            description: "慢请求（>250ms）占比在 6h 窗口为 {{ $value | humanizePercentage }}，SLO 允许 1%。6 小时消耗约 5% 的 30 天错误预算，约 5 天会全部用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
+        - alert: LabApiLatencyBudgetBurnSlow
+          expr: |
+            lab_api:http_slow_ratio:rate1d > (3 * 0.01)
+            and
+            lab_api:http_slow_ratio:rate2h > (3 * 0.01)
+          for: 1h
+          labels:
+            severity: warning
+            slo: latency
+            service: lab-api
+          annotations:
+            summary: "lab-api latency 错误预算燃烧过快（1d/2h 燃烧率 > 3）"
+            description: "慢请求（>250ms）占比在 1d 窗口为 {{ $value | humanizePercentage }}，SLO 允许 1%。1 天消耗约 10% 的 30 天错误预算，约 10 天会全部用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
+        - alert: LabApiLatencyBudgetBurnTrend
+          expr: |
+            lab_api:http_slow_ratio:rate3d > (1 * 0.01)
+            and
+            lab_api:http_slow_ratio:rate6h > (1 * 0.01)
+          for: 3h
+          labels:
+            severity: warning
+            slo: latency
+            service: lab-api
+          annotations:
+            summary: "lab-api latency 错误预算燃烧过快（3d/6h 燃烧率 > 1）"
+            description: "慢请求（>250ms）占比在 3d 窗口为 {{ $value | humanizePercentage }}，SLO 允许 1%。按当前速度，30 天周期结束时预算正好用完。"
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage3-observability.md#错误预算燃烧告警
