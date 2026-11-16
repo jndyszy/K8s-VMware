@@ -1,0 +1,87 @@
+# Grafana Alloy values（阶段 3.6）：每个节点一个采集器，读取本节点 Pod 日志文件推送到 Loki
+# 安装：helm upgrade --install alloy grafana/alloy --version 1.16.0 -n logging -f platform/logging/alloy-values.yaml
+# Promtail 已停止维护，官方推荐迁移到 Alloy
+controller:
+  type: daemonset
+  # master 上也有 Pod（etcd、apiserver 等），容忍控制平面污点，采集全部节点
+  tolerations:
+    - operator: Exists
+
+alloy:
+  # 挂载宿主机 /var/log，kubelet 把容器 stdout 写在 /var/log/pods/<ns>_<pod>_<uid>/<container>/N.log
+  mounts:
+    varlog: true
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }
+  configMap:
+    content: |
+      // 1. 只发现本节点上的 Pod，避免 4 个采集器重复采集
+      //    chart 在 DaemonSet 中已通过 Downward API 把 HOSTNAME 设为节点名
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("HOSTNAME")
+        }
+      }
+
+      // 2. 把 Pod 元数据转成 Loki 标签，并拼出日志文件路径
+      //    标签只放低基数字段（命名空间、应用、容器、节点），请求级字段留在日志内容里
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+        }
+        // app 优先取 app.kubernetes.io/name，若 Pod 有 app 标签则以它为准
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          regex         = "(.+)"
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/*.log"
+        }
+      }
+
+      // 3. 跟踪日志文件
+      local.file_match "pods" {
+        path_targets = discovery.relabel.pods.output
+      }
+      loki.source.file "pods" {
+        targets    = local.file_match.pods.targets
+        forward_to = [loki.process.pods.receiver]
+      }
+
+      // 4. 解析 containerd 的 CRI 日志格式（时间戳 + stdout/stderr + 内容），去掉前缀
+      loki.process "pods" {
+        stage.cri {}
+        forward_to = [loki.write.default.receiver]
+      }
+
+      // 5. 推送到 Loki
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.logging.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }

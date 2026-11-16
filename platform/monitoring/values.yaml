@@ -59,6 +59,15 @@ grafana:
     existingSecret: grafana-admin
     userKey: admin-user
     passwordKey: admin-password
+  # Loki 数据源（阶段 3.6），uid 固定为 loki，仪表盘按 uid 引用
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.logging.svc.cluster.local:3100
+      jsonData:
+        maxLines: 1000
   # 允许从所有命名空间加载带 grafana_dashboard 标签的 ConfigMap 作为仪表盘
   sidecar:
     dashboards:

@@ -1,0 +1,61 @@
+# Loki values（阶段 3.6）：单进程模式，日志落盘到 local-path，保留 7 天
+# 安装：helm upgrade --install loki grafana/loki --version 7.6.0 -n logging --create-namespace \
+#         -f platform/logging/loki-values.yaml
+# 只给标签（namespace、pod、app 等）建索引，日志内容按需扫描，资源占用远小于 Elasticsearch
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false            # 单租户实验环境
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2026-11-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    retention_period: 168h       # 7 天
+  compactor:
+    retention_enabled: true      # 由 compactor 删除过期日志
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 10Gi
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# 单进程模式下不需要的组件全部关闭，节省内存
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+gateway:
+  enabled: false                 # 直接访问 loki:3100，不经过 nginx 网关
+chunksCache:
+  enabled: false                 # 默认会起 memcached，实验规模用不上
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+minio:
+  enabled: false
+
+# Loki 自身指标接入 Prometheus
+monitoring:
+  serviceMonitor:
+    enabled: true
