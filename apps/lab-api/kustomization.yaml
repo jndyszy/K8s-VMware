@@ -5,6 +5,7 @@ namespace: lab
 resources:
   - deployment.yaml
   - service.yaml
+  - servicemonitor.yaml
 images:
   - name: harbor.jndys.xyz/lab/lab-api
     newTag: 0bc6426

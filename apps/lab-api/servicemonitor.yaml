@@ -1,0 +1,14 @@
+# lab-api ServiceMonitor（阶段 3）：Prometheus Operator 据此生成采集配置
+# 通过 Service 的标签找到 lab-api，再按 Endpoints 逐个 Pod 采集 /metrics（每个副本单独一个采集目标）
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: lab-api
+  labels: { app: lab-api }
+spec:
+  selector:
+    matchLabels: { app: lab-api }
+  endpoints:
+    - port: http          # Service 里的端口名
+      path: /metrics
+      interval: 15s       # 比全局默认 30s 更密，SLO 计算更灵敏
