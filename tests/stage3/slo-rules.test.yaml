@@ -47,3 +47,33 @@ tests:
         exp_samples:
           - labels: 'lab_api:slo_availability:target'
             value: 0.995
+
+  # ---- 告警测试 ----
+  # 30 分钟正常，然后错误率 50%（燃烧率 100）持续 30 分钟。
+  # 断言 Prometheus 自动生成的 ALERTS 序列（只含告警名、状态和标签），
+  # 而不是 alert_rule_test：后者会连注解一起比较，注解里的百分比是运行时算出的，没法写死。
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="lab", job="lab-api", path="/", pod="a", code="200"}'
+        values: '0+100x30 3000+50x30'
+      - series: 'http_requests_total{namespace="lab", job="lab-api", path="/", pod="a", code="500"}'
+        values: '0+0x30 0+50x30'
+    promql_expr_test:
+      # 正常阶段不告警
+      - expr: ALERTS{alertname="LabApiAvailabilityBudgetBurnFast"}
+        eval_time: 29m
+        exp_samples: []
+      # 故障约 20 分钟后：1h 错误率约 0.19、5m 错误率 0.5，都超过 14.4 × 0.5% = 7.2%，且已持续超过 for: 2m
+      - expr: ALERTS{alertname="LabApiAvailabilityBudgetBurnFast", alertstate="firing"}
+        eval_time: 50m
+        exp_samples:
+          - labels: 'ALERTS{alertname="LabApiAvailabilityBudgetBurnFast", alertstate="firing", severity="critical", slo="availability", service="lab-api"}'
+            value: 1
+      # 6h 窗口还没超过 6 × 0.5% = 3% 太久，加上 for: 15m，此时不应触发
+      - expr: ALERTS{alertname="LabApiAvailabilityBudgetBurnMedium", alertstate="firing"}
+        eval_time: 35m
+        exp_samples: []
+      # 延迟没有问题，延迟告警不应触发
+      - expr: ALERTS{slo="latency"}
+        eval_time: 50m
+        exp_samples: []
