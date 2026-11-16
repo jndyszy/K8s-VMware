@@ -1,0 +1,81 @@
+# kube-prometheus-stack values（阶段 3）
+# 安装：helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+#         --version 93.3.0 -n monitoring --create-namespace -f platform/monitoring/values.yaml
+# 前置：Grafana 管理员凭据 Secret grafana-admin 需人工创建（密码不进 Git），见 docs/stage3-observability.md
+
+# ---- 控制平面组件 ----
+# kubeadm 默认让 controller-manager / scheduler / etcd 的指标端口、kube-proxy 的指标端口只监听 127.0.0.1，
+# Prometheus 抓不到，会一直报 TargetDown。先关闭这几项监控及对应告警规则，改监听地址作为改进项。
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+
+# ---- Prometheus ----
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    retentionSize: 8GB
+    # 默认只发现带本 release 标签的 ServiceMonitor / PodMonitor / PrometheusRule；
+    # 改为发现所有命名空间里的，这样 apps/lab-api 里定义的监控配置也能被采集
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { memory: 1536Mi }
+    # 时序数据落盘到 local-path（数据只在 Prometheus 所在节点上）
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests: { storage: 10Gi }
+
+# ---- Alertmanager ----
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+
+# ---- Grafana ----
+grafana:
+  # chart 默认管理员密码是公开的 prom-operator，必须覆盖；凭据放在人工创建的 Secret 里，不进 Git
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  # 允许从所有命名空间加载带 grafana_dashboard 标签的 ConfigMap 作为仪表盘
+  sidecar:
+    dashboards:
+      searchNamespace: ALL
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+# ---- 其余组件 ----
+prometheusOperator:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 192Mi }
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 10m, memory: 24Mi }
+    limits: { memory: 64Mi }
