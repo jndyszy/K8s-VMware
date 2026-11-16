@@ -1,0 +1,52 @@
+# lab-api Deployment（阶段 2）
+# 镜像 tag 由 kustomization.yaml 的 images.newTag 决定，这里的 tag 只是占位
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-api
+  labels: { app: lab-api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: lab-api }
+  template:
+    metadata:
+      labels: { app: lab-api }
+    spec:
+      terminationGracePeriodSeconds: 30
+      # 两个副本尽量分散到不同节点
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: lab-api }
+      # 安全基线（Pod Security restricted）；distroless nonroot 用户 UID/GID = 65532
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: lab-api
+          image: harbor.jndys.xyz/lab/lab-api:placeholder
+          ports:
+            - { name: http, containerPort: 8080 }
+          # 就绪探针摘得快：配合程序收到 SIGTERM 后 /readyz 返回 503 再等 5 秒退出
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            failureThreshold: 1
+          # 存活探针重启得慢：避免一次抖动就误杀
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          # 不设 CPU limit：CPU 超用只会被限速，设了反而容易在突发时被限流
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }

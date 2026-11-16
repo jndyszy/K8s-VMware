@@ -1,0 +1,20 @@
+# ArgoCD Application（阶段 2）：把本仓库 apps/lab-api 同步到集群的 lab 命名空间
+# lab 命名空间和 harbor-pull 拉取凭据由人工创建（凭据不进 Git），这里不让 ArgoCD 管理命名空间
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lab-api
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jndyszy/K8s-VMware.git
+    targetRevision: main
+    path: apps/lab-api
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: lab
+  syncPolicy:
+    automated:
+      prune: true      # Git 里删掉的资源，集群里也删掉
+      selfHeal: true   # 有人在集群里手动改了配置，自动改回 Git 里的样子
