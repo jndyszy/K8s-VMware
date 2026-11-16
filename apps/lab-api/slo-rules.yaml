@@ -1,0 +1,140 @@
+# lab-api SLO 记录规则（阶段 3）
+#
+# SLI（服务质量指标），只统计业务接口 /，不含探针和 /metrics：
+#   可用性：返回码不是 5xx 的请求占比
+#   延迟：  250ms 内完成的请求占比（250ms 对应直方图的 le="0.25" 桶边界，必须取桶边界才能精确计算）
+# SLO（服务质量目标），以 30 天为周期：
+#   可用性 99.5%  → 错误预算 0.5%，30 天约 3.6 小时
+#   延迟   99%    → 允许 1% 的请求超过 250ms
+#
+# 记录规则把常用查询预先算好存成新序列，Grafana 和告警直接读结果，查询快且口径统一。
+# 命名约定 level:metric:operations，例如 lab_api:http_error_ratio:rate5m
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: lab-api-slo
+  labels: { app: lab-api }
+spec:
+  groups:
+    - name: lab-api-slo-target
+      rules:
+        # SLO 目标值存成常量序列，仪表盘和告警引用同一个值
+        - record: lab_api:slo_availability:target
+          expr: vector(0.995)
+        - record: lab_api:slo_latency:target
+          expr: vector(0.99)
+    - name: lab-api-sli
+      interval: 30s
+      rules:
+        # ---- 5m 窗口 ----
+        - record: lab_api:http_error_ratio:rate5m
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[5m]))
+        - record: lab_api:http_slow_ratio:rate5m
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[5m]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[5m]))
+            )
+        # ---- 30m 窗口 ----
+        - record: lab_api:http_error_ratio:rate30m
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[30m]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[30m]))
+        - record: lab_api:http_slow_ratio:rate30m
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[30m]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[30m]))
+            )
+        # ---- 1h 窗口 ----
+        - record: lab_api:http_error_ratio:rate1h
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[1h]))
+        - record: lab_api:http_slow_ratio:rate1h
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[1h]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[1h]))
+            )
+        # ---- 2h 窗口 ----
+        - record: lab_api:http_error_ratio:rate2h
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[2h]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[2h]))
+        - record: lab_api:http_slow_ratio:rate2h
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[2h]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[2h]))
+            )
+        # ---- 6h 窗口 ----
+        - record: lab_api:http_error_ratio:rate6h
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[6h]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[6h]))
+        - record: lab_api:http_slow_ratio:rate6h
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[6h]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[6h]))
+            )
+        # ---- 1d 窗口 ----
+        - record: lab_api:http_error_ratio:rate1d
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[1d]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[1d]))
+        - record: lab_api:http_slow_ratio:rate1d
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[1d]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[1d]))
+            )
+        # ---- 3d 窗口 ----
+        - record: lab_api:http_error_ratio:rate3d
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[3d]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[3d]))
+        - record: lab_api:http_slow_ratio:rate3d
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[3d]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[3d]))
+            )
+        # ---- 30d 窗口 ----
+        - record: lab_api:http_error_ratio:rate30d
+          expr: |
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/", code=~"5.."}[30d]))
+            /
+            sum(rate(http_requests_total{namespace="lab", job="lab-api", path="/"}[30d]))
+        - record: lab_api:http_slow_ratio:rate30d
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{namespace="lab", job="lab-api", path="/", le="0.25"}[30d]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="lab", job="lab-api", path="/"}[30d]))
+            )
+    - name: lab-api-error-budget
+      interval: 1m
+      rules:
+        # 剩余错误预算：1 表示一点没用，0 表示刚好用完，负数表示超支
+        - record: lab_api:error_budget_remaining:availability_30d
+          expr: 1 - lab_api:http_error_ratio:rate30d / (1 - 0.995)
+        - record: lab_api:error_budget_remaining:latency_30d
+          expr: 1 - lab_api:http_slow_ratio:rate30d / (1 - 0.99)

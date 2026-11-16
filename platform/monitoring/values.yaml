@@ -25,7 +25,8 @@ defaultRules:
 # ---- Prometheus ----
 prometheus:
   prometheusSpec:
-    retention: 7d
+    # SLO 以 30 天为周期，保留期至少要覆盖 30 天；retentionSize 兜底，先到哪个上限就按哪个删
+    retention: 30d
     retentionSize: 8GB
     # 默认只发现带本 release 标签的 ServiceMonitor / PodMonitor / PrometheusRule；
     # 改为发现所有命名空间里的，这样 apps/lab-api 里定义的监控配置也能被采集

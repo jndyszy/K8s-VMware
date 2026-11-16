@@ -32,6 +32,11 @@ spec:
           image: harbor.jndys.xyz/lab/lab-api:placeholder
           ports:
             - { name: http, containerPort: 8080 }
+          # 故障注入开关（阶段 3 演示错误预算消耗与告警）：改这里提交到 Git，由 ArgoCD 生效
+          # 不要用 kubectl set env：selfHeal 会把手动改动恢复成 Git 里的值
+          env:
+            - { name: FAIL_RATE, value: "0" }     # / 返回 500 的比例，0~1
+            - { name: LATENCY_MS, value: "0" }    # / 额外延迟（毫秒）
           # 就绪探针摘得快：配合程序收到 SIGTERM 后 /readyz 返回 503 再等 5 秒退出
           readinessProbe:
             httpGet: { path: /readyz, port: http }
