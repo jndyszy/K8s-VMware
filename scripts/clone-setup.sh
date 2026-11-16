@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
 # clone-setup.sh —— 阶段 0.4：每台克隆出来的虚拟机执行一次
-# 重置 machine-id 和 SSH 主机密钥、设置主机名和静态 IP。执行后会断开 SSH，用新 IP 重新连接。
+# 重置 machine-id 和 SSH 主机密钥、设置主机名和静态 IP，并让 systemd-resolved 在节点 IP 上提供 DNS
+# （供 CoreDNS 作为上游，见 platform/coredns/configmap.yaml）。执行后会断开 SSH，用新 IP 重新连接。
 #
 # 用法（root）：
 #   ./clone-setup.sh k8s-worker-1 10.10.10.11
 #
 # 可选环境变量：
-#   GATEWAY=10.10.10.2   DNS=10.10.10.2   IFACE=ens160
+#   GATEWAY=10.10.10.2   DNS=10.10.10.2   IFACE=enp2s0（默认自动识别第一块非 lo 网卡）
 # =============================================================================
 set -euo pipefail
 
@@ -61,8 +62,14 @@ network:
 EOF
 chmod 600 /etc/netplan/50-static.yaml
 
+# 6. systemd-resolved 额外在节点 IP 上监听 53 端口，作为 CoreDNS 的上游
+#    Fusion NAT 的 DNS 处理不了 EDNS（返回畸形报文），resolved 会自动降级重试，CoreDNS 不会
+mkdir -p /etc/systemd/resolved.conf.d
+printf '[Resolve]\nDNSStubListenerExtra=%s\n' "$IP" >/etc/systemd/resolved.conf.d/k8s-node-dns.conf
+
 echo "==> machine-id:   $(cat /etc/machine-id)"
 echo "==> product_uuid: $(cat /sys/class/dmi/id/product_uuid)"
 echo "==> SSH 主机密钥已重新生成，Mac 上先执行：ssh-keygen -R ${IP}"
 echo "==> 应用网络配置，SSH 会断开，请用 ${IP} 重新连接"
 netplan apply
+systemctl restart systemd-resolved
