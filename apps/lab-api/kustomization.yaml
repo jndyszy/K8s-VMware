@@ -11,4 +11,4 @@ resources:
   - dashboard.yaml
 images:
   - name: harbor.jndys.xyz/lab/lab-api
-    newTag: 16f255e
+    newTag: 6441dcf
