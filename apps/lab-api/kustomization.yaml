@@ -6,6 +6,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - servicemonitor.yaml
+  - slo-rules.yaml
 images:
   - name: harbor.jndys.xyz/lab/lab-api
     newTag: 16f255e
