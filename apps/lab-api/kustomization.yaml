@@ -8,4 +8,4 @@ resources:
   - servicemonitor.yaml
 images:
   - name: harbor.jndys.xyz/lab/lab-api
-    newTag: 0bc6426
+    newTag: 16f255e
