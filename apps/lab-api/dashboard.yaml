@@ -675,6 +675,97 @@ data:
             },
             "overrides": []
           }
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "日志（Loki）",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 24
+          },
+          "panels": []
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "每分钟错误日志数",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "description": "从日志统计：level=ERROR 的访问日志条数。和指标里的 5xx 速率应当一致，可互相印证。",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 25
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "expr": "sum(count_over_time({namespace=\"lab\", app=\"lab-api\"} | json | level=\"ERROR\" [1m]))",
+              "legendFormat": "errors/min"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 5
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 15,
+          "type": "logs",
+          "title": "5xx 访问日志",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "description": "lab-api 返回 5xx 的请求明细。燃烧率告警触发时先看这里：哪个 Pod、什么时间、耗时多少。",
+          "gridPos": {
+            "h": 8,
+            "w": 16,
+            "x": 8,
+            "y": 25
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "expr": "{namespace=\"lab\", app=\"lab-api\"} | json | status >= 500"
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "enableLogDetails": true
+          }
         }
       ]
     }
