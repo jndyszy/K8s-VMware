@@ -58,9 +58,10 @@
 
     - name: 读取路由器上的文件哈希与权限
       ansible.builtin.raw: |
-        sha256sum '{{ item.dest }}' 2>/dev/null | cut -d' ' -f1
-        stat -c '%a' '{{ item.dest }}' 2>/dev/null
-        exit 0
+        [ -f '{{ item.dest }}' ] || exit 0
+        sha256sum '{{ item.dest }}' | cut -d' ' -f1
+        # OpenWrt 的 BusyBox 没有 stat，用 ls -l 的权限位换算成八进制（-rwxr-xr-x → 755；不处理 suid/sticky）
+        ls -l '{{ item.dest }}' | awk '{p=$1; m=0; for(i=2;i<=10;i++) m=m*2+(substr(p,i,1)!="-"); printf "%o\n", m}'
       loop: "{{ openwrt_files }}"
       register: remote_sha
       changed_when: false
