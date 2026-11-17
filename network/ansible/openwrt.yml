@@ -168,7 +168,12 @@
         sleep {{ 12 if (not ansible_check_mode and (pkgs.changed or services.changed or 'restart frr' in file_handlers)) else 0 }}
         echo "established=$(vtysh -c 'show bgp ipv4 unicast summary json' | jsonfilter -e '@.peers[*].state' | grep -c Established)"
         echo "lb_nexthops=$(ip route show 10.200.0.0/24 | grep -c 'nexthop via')"
-        echo "grafana=$(nslookup grafana.lab.internal 127.0.0.1 2>/dev/null | awk '/^Address/ && !/:53/ {print $2}' | tail -1)"
+        # dnsmasq 刚重启时需要一两秒才开始应答，最多重试 5 次
+        for i in 1 2 3 4 5; do
+          ip=$(nslookup grafana.lab.internal 127.0.0.1 2>/dev/null | awk '/^Address/ && !/:53/ {print $2}' | tail -1)
+          [ -n "$ip" ] && break; sleep 1
+        done
+        echo "grafana=$ip"
       register: verify
       changed_when: false
       check_mode: false
