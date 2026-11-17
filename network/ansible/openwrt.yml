@@ -1,12 +1,13 @@
 # 阶段 4.7：frr-router（OpenWrt 25.12）配置管理
 #
-# 在 Mac 上执行（需要 ansible-core，SSH 别名 frr-router 可免密登录）：
+# 控制节点：k8s-master（root），apt 安装 ansible-core；/root/.ssh/config 中的 frr-router 别名使用专用密钥
+#   /root/.ssh/id_ed25519_frr（只授权给路由器，见 docs/stage4-network.md）。
 #   cd network/ansible
 #   ansible-playbook openwrt.yml --check     # 只报告差异，不做任何修改
 #   ansible-playbook openwrt.yml             # 应用；第二次执行应为 changed=0（幂等）
 #
 # OpenWrt 没有 Python，Ansible 的常规模块（copy、template、lineinfile……）都依赖远端 Python，
-# 所以这里全部用 raw 模块执行远端 sh，文件用本机 scp -O 上传（dropbear 没有 sftp-server）。
+# 所以这里全部用 raw 模块执行远端 sh，文件用控制节点上的 scp -O 上传（dropbear 没有 sftp-server）。
 # 每个修改类任务自己实现 check 模式：check 模式下照常运行、只打印 "CHANGED: ..." 而不修改，
 # 因此 --check 能真实反映差异（raw 默认在 check 模式下直接跳过，什么也看不到）。
 - name: frr-router 配置
@@ -47,7 +48,8 @@
       check_mode: false
 
     - name: 计算本地文件哈希
-      ansible.builtin.command: shasum -a 256 "{{ playbook_dir }}/{{ item.src }}"
+      # Linux 用 sha256sum，macOS 用 shasum，两者输出格式相同
+      ansible.builtin.shell: sha256sum "{{ playbook_dir }}/{{ item.src }}" 2>/dev/null || shasum -a 256 "{{ playbook_dir }}/{{ item.src }}"
       loop: "{{ openwrt_files }}"
       register: local_sha
       delegate_to: localhost
