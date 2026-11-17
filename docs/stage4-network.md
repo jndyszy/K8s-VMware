@@ -196,6 +196,73 @@ Mac 上循环 curl，两个 Pod 名都出现。
 - 正常关机时 BIRD 会主动发 Cease，路由 1 秒内撤销；拔线式故障只能等保持时间。
 - 前提是 4.3 的出口过滤：如果其他 worker 仍转发"下一跳 .13"的路径，撤销时间会被拉长到节点间 iBGP 超时。
 
+## 4.6 split DNS：lab.internal
+
+```text
+节点 resolved:  ~lab.internal ──(DNS delegate)──▶ 10.10.10.20 dnsmasq（本地记录应答，local=/lab.internal/ 永不转发）
+               其他所有域名  ──(链路 DNS)──────▶ 10.10.10.2（不变）
+CoreDNS:       lab.internal:53 { forward . 10.10.10.20 }
+Mac:           /etc/resolver/lab.internal → nameserver 10.10.10.20
+dnsmasq 上游:  4 台节点 resolved（仅路由器自身解析公网时用到）
+```
+
+| 名字 | 地址 |
+| --- | --- |
+| grafana / argocd / lab-api `.lab.internal` | 10.200.0.10 / .11 / .20 |
+| frr-router、k8s-master、k8s-worker-1..3 `.lab.internal` | 10.10.10.20、.10–.13 |
+
+### 先清理：Rogue RA 留下的 IPv6
+
+OpenWrt 装好时 eth0 就在 vmnet2 上，出厂开着 RA 与 DHCPv6；节点 netplan 没关"接受 RA"，3 台节点拿到了 `fd45:d89:d86d::/64` 的地址和前缀委派，
+还把路由器的 `fd45::1` 加进了 DNS 服务器列表。4.1 删掉 ULA 后这个 DNS 服务器不可达，resolved 偶尔选中它就要等超时。
+
+- 路由器：`/etc/init.d/odhcpd stop; /etc/init.d/odhcpd disable`（DHCPv4 由 dnsmasq 负责，不受影响）。
+- 节点：netplan 加 `dhcp6: false`、`accept-ra: false` 后 `netplan apply`（等同交换机上的 RA Guard，`clone-setup.sh` 已同步）。
+
+### 路由器（dnsmasq）
+
+```bash
+uci set dhcp.@dnsmasq[0].local='/lab.internal/'    # 本地应答，查不到返回 NXDOMAIN，永不转发：防环路第二道保险
+uci set dhcp.@dnsmasq[0].domain='lab.internal'
+for r in grafana:10.200.0.10 argocd:10.200.0.11 lab-api:10.200.0.20 \
+         frr-router:10.10.10.20 k8s-master:10.10.10.10 k8s-worker-1:10.10.10.11 k8s-worker-2:10.10.10.12 k8s-worker-3:10.10.10.13; do
+  uci add dhcp domain >/dev/null
+  uci set dhcp.@domain[-1].name="${r%%:*}.lab.internal"; uci set dhcp.@domain[-1].ip="${r##*:}"
+done
+uci commit dhcp; service dnsmasq restart
+```
+
+完整配置快照：[`network/openwrt/dhcp.uci`](../network/openwrt/dhcp.uci)。
+
+### 节点：DNS delegate，而不是 resolved.conf 的全局 DNS=
+
+```bash
+mkdir -p /etc/systemd/dns-delegate.d
+printf '[Delegate]\nDNS=10.10.10.20\nDomains=~lab.internal\n' > /etc/systemd/dns-delegate.d/lab-internal.dns-delegate
+systemctl restart systemd-resolved
+```
+
+在 `resolved.conf` 写全局 `DNS=10.10.10.20` + `Domains=~lab.internal` 看似等价，实则有坑：**resolved 的全局作用域永远是默认路由**，
+公网查询也会发给 .20，而 dnsmasq 上游又是节点 resolved，形成环路。systemd 258 起的 DNS delegate 是独立于网卡的按域委派，
+`DefaultRoute` 默认关闭，正好只接管 `lab.internal`（Ubuntu 26.04 为 systemd 259）。
+
+`resolvectl query grafana.lab.internal` 输出里的 `-- link: enp2s0` 只表示应答从哪块网卡收回，不代表用了链路 DNS；
+抓包确认查询发往 10.10.10.20。对照：直接问 10.10.10.2 得到 fake-ip——不做 split DNS，内部名字会被 Mac 代理当成公网域名。
+
+### CoreDNS 与 Mac
+
+- [`platform/coredns/configmap.yaml`](../platform/coredns/configmap.yaml) 增加 `lab.internal:53` 块，Pod 内可解析
+  （`kubectl -n lab exec deploy/lab-api-loadgen -- nslookup grafana.lab.internal`）。
+- Mac：`echo 'nameserver 10.10.10.20' | sudo tee /etc/resolver/lab.internal`。**`dig`/`nslookup` 不读 `/etc/resolver`**，
+  用 `dscacheutil -q host -a name grafana.lab.internal`、`curl` 或浏览器验证。
+- Mac 开着系统代理时，代理例外列表里有 `10.0.0.0/8`，但按 IP 匹配对域名访问无效：`curl https://argocd.lab.internal` 会先发给代理
+  （返回 `200 Connection established`）。建议把 `*.lab.internal` 加入系统代理例外和 `NO_PROXY`，让内部服务始终直连。
+
+### 验证路由器 DNS 故障的影响
+
+路由器 `service dnsmasq stop` 后：节点 `resolvectl query github.com` 照常解析，`grafana.lab.internal` 失败；`service dnsmasq start` 恢复。
+故障只影响内部域名——这是 split DNS 相对"主 .20、备 .2"的优势（后者还要等主 DNS 超时，且有环路）。
+
 ## 踩坑记录
 
 1. **Fusion DNS 让 dnsmasq 解析为空**：见 4.1，上游改为节点 resolved。dnsmasq 日志里的 `refused to do a recursive query` 是线索。
@@ -204,7 +271,9 @@ Mac 上循环 curl，两个 Pod 名都出现。
 4. **路由器时钟慢了 3 分 25 秒**：sysntpd 在 dnsmasq 修好之前启动，域名解析失败后没有恢复同步，导致路由器日志与 Mac、节点的时间对不上，
    演练时间线一度无法对齐。`service sysntpd restart` 后同步。排障时日志时间不可信是大忌，路由器配好 DNS 后应重启一次 NTP。
 5. **BusyBox `ip` 看不到 ECMP**：多路径路由只显示第一行，装 `ip-full`。
-6. **在错误的机器上执行命令**：`vtysh` 在 k8s-master 上报 not found——看提示符（`root@frr-router` / `root@k8s-master`）。
+6. **Rogue RA**：OpenWrt 出厂 RA/DHCPv6 让节点拿到 IPv6 地址和失效的 DNS 服务器，见 4.6。
+7. **resolved 全局 DNS 作用域总是默认路由**：split DNS 要用 DNS delegate，见 4.6。
+8. **在错误的机器上执行命令**：`vtysh` 在 k8s-master 上报 not found——看提示符（`root@frr-router` / `root@k8s-master`）。
 
 ## 改进项
 
