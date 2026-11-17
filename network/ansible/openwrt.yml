@@ -173,6 +173,14 @@
       changed_when: false
       check_mode: false
 
+    - name: 变更明细（check 模式下为"将要做的修改"）
+      ansible.builtin.debug:
+        msg: >-
+          {{ (pkgs.stdout_lines + services.stdout_lines + keep.stdout_lines
+              + (uci.results | map(attribute='stdout_lines') | flatten)) | select('match', 'CHANGED') | list
+             + (upload.results | selectattr('changed', 'defined') | selectattr('changed')
+                | map(attribute='item.0.dest') | map('regex_replace', '^', 'CHANGED: 上传 ') | list) }}
+
     - name: 结果
       ansible.builtin.debug:
         msg: "{{ release.stdout_lines + verify.stdout_lines }}"
