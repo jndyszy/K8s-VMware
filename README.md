@@ -13,8 +13,8 @@
 | 镜像仓库 | 公网 Harbor（Let's Encrypt），Docker Hub 代理缓存、Trivy 扫描、机器人账号 |
 | CI/CD | GitHub Actions（ARM64 Runner）→ Harbor → ArgoCD |
 | 可观测性 | kube-prometheus-stack（Prometheus / Alertmanager / Grafana），SLI/SLO 与多窗口燃烧率告警；Loki + Alloy 集中日志 |
-| 网络 | OpenWrt + FRR（AS 64500，单臂路由 `.20`）与集群 eBGP 对等，宣告 Pod 网段与 LoadBalancer IP（10.200.0.0/24），ECMP |
-| DNS | 节点名由 `/etc/hosts` 解析（兜底）；阶段 4 起 OpenWrt dnsmasq 提供 `lab.internal` 内部域名 |
+| 网络 | OpenWrt + FRR（AS 64500，单臂路由 `.20`）与集群 eBGP 对等，宣告 Pod 网段与 LoadBalancer IP（10.200.0.0/24，Calico 原生 LB IPAM），ECMP，节点故障 9 秒收敛 |
+| DNS | 节点名由 `/etc/hosts` 解析（兜底）；OpenWrt dnsmasq 提供 `lab.internal` 内部域名（split DNS） |
 
 ### 出口与 DNS 设计
 
@@ -35,7 +35,7 @@
 | 1 | kubeadm 集群、Calico、存储、DNS、NetworkPolicy（[手册](docs/stage1-cluster.md)） | ✅ |
 | 2 | Go 服务 lab-api、GitHub Actions、Harbor、ArgoCD GitOps（[手册](docs/stage2-gitops.md)） | ✅ |
 | 3 | kube-prometheus-stack、告警、SLI/SLO、错误预算、Loki 集中日志（[手册](docs/stage3-observability.md)） | ✅ |
-| 4 | OpenWrt/FRR + Calico BGP、LoadBalancer IP 宣告、内部 DNS、网络自动化 | ⬜ |
+| 4 | OpenWrt/FRR + Calico BGP、LoadBalancer IP 宣告与 ECMP、内部 DNS、BGP 监控、Ansible（[手册](docs/stage4-network.md)） | ✅ |
 | 5 | Terraform 公有云 VPC/ECS | ⬜ |
 | — | 故障演练与复盘（[docs/postmortems](docs/postmortems)） | ⬜ |
 

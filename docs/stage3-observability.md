@@ -270,7 +270,7 @@ SLO 仪表盘底部新增「日志（Loki）」一行：每分钟 `level=ERROR` 
 1. **Grafana 被 OOMKilled**：凭经验给的 256 Mi 上限，Grafana 13 空载就用了 252 Mi，打开仪表盘时被内核杀掉（退出码 137），表现为 `port-forward` 报 `connection refused`。调到 512 Mi 后实测打开仪表盘约 322 Mi。资源配额应按实测数据调整——这也正是监控的价值。
 2. **distroless 镜像里没有 `wget`**：Prometheus 容器无法 `kubectl exec` 调接口，改为经 API Server 代理访问：`kubectl get --raw /api/v1/namespaces/monitoring/services/kps-kube-prometheus-stack-prometheus:9090/proxy/api/v1/...`。
 3. **浮点数不能直接判等**：promtool 测试期望 `0.02`，实际 `1 − 0.98 = 0.020000000000000018`。`fuzzy_compare: true` 的容差不足以覆盖；改为断言里先 `round(x, 0.001)` 再比较（`round` 会去掉指标名，期望标签写 `{}`）。
-4. **`port-forward` 不是持久化访问**：它只是 kubectl 进程开的临时隧道。持久访问计划在阶段 4 用 LoadBalancer IP + `*.lab.internal` 解决。
+4. **`port-forward` 不是持久化访问**：它只是 kubectl 进程开的临时隧道。阶段 4 已改为 LoadBalancer IP + `*.lab.internal`（http://grafana.lab.internal）。
 5. **虚拟机重启后 Loki 短暂 1/2、重启计数增加**：容器上次退出码 `255`、原因 `Unknown`，是节点重启时容器被直接中断；Loki 启动时要先加入 memberlist，期间日志里有"解析不了 `loki-memberlist`"的警告、就绪探针返回 503，属正常启动过程。判断方法：`uptime -s` 看节点开机时间，`/ready` 接口返回 `ready` 即恢复。
 6. **单台节点拉镜像 `connection reset by peer`**：`failed to copy` 说明已开始下载、中途被断开，是 Mac 代理或 Harbor 侧的偶发网络问题，不是配置问题（其他节点拉同一镜像正常）。kubelet 会按退避自动重试；也可在该节点 `crictl pull` 手动拉一次加快恢复。
 
@@ -285,4 +285,4 @@ SLO 仪表盘底部新增「日志（Loki）」一行：每分钟 `level=ERROR` 
 
 ## 下一步
 
-阶段 4：OpenWrt + FRR 与 Calico eBGP、ECMP，MetalLB 分配 LoadBalancer IP 并由 Calico 宣告，dnsmasq 提供 `lab.internal` 内部域名，替代 `port-forward`。
+阶段 4：OpenWrt + FRR 与 Calico eBGP、ECMP，Calico 原生 LB IPAM 分配并宣告 LoadBalancer IP，dnsmasq 提供 `lab.internal` 内部域名，替代 `port-forward`（见 [stage4-network.md](stage4-network.md)）。

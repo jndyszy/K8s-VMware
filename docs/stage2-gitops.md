@@ -121,7 +121,7 @@ kubectl apply -f platform/argocd/lab-api-application.yaml
 
 `lab` 命名空间和 `harbor-pull` 凭据人工创建（凭据不进 Git），不交给 ArgoCD 管理。
 
-网页访问（阶段 4 有 LoadBalancer IP 后改为 `argocd.lab.internal`）：
+网页访问（阶段 4 起直接打开 https://argocd.lab.internal，下面的 port-forward 为阶段 2 时的做法）：
 
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo

@@ -263,7 +263,9 @@ systemctl restart systemd-resolved
 路由器 `service dnsmasq stop` 后：节点 `resolvectl query github.com` 照常解析，`grafana.lab.internal` 失败；`service dnsmasq start` 恢复。
 故障只影响内部域名——这是 split DNS 相对"主 .20、备 .2"的优势（后者还要等主 DNS 超时，且有环路）。
 
-## 4.7 BGP 监控与告警
+## 4.7 BGP 监控与网络自动化
+
+### BGP 监控与告警
 
 OpenWrt 没有 Python，原计划"Python 自写 exporter，SSH 登录路由器执行 vtysh"需要新镜像、Deployment，还要把路由器 root 私钥放进集群。
 改为**在路由器上用设备原生能力实现 exporter**：uhttpd 以 CGI 方式执行 [`bgp-metrics.cgi`](../network/openwrt/bgp-metrics.cgi)
@@ -302,7 +304,7 @@ kubectl apply -f platform/monitoring/frr-router-scrapeconfig.yaml \
 `promtool test rules` 结果 SUCCESS。查看告警：Grafana → Alerting → Alert rules → Data source-managed → `monitoring/frr-bgp`
 （列表显示规则定义，`{{ $labels.peer }}` 不展开；展开 Instances 看渲染后的内容），或 Explore 查询 `ALERTS{alertname=~"Frr.*"}`。
 
-### 告警演练：管理性关闭 worker-1 邻居
+#### 告警演练：管理性关闭 worker-1 邻居
 
 `neighbor 10.10.10.11 shutdown`（等同 H3C `peer ... ignore`，只改运行配置不 `write memory`）。worker-1 上没有 Local 服务后端，业务无影响。
 
@@ -319,7 +321,7 @@ kubectl apply -f platform/monitoring/frr-router-scrapeconfig.yaml \
 告警时延构成：抓取间隔 15 秒 + 规则评估间隔 30 秒（chart 默认）+ `for` 30 秒，约 1 分钟。BGP 自身 9 秒收敛，**告警是给人看的，不在业务恢复路径上**；
 如需更快感知可缩短评估间隔，代价是 Prometheus 负载。
 
-## 4.7 Ansible 管理路由器配置
+### Ansible 管理路由器配置
 
 [`network/ansible/`](../network/ansible/)：`group_vars/openwrt.yml` 描述期望状态（软件包、文件放哪里、uci 各项取值），
 文件内容在 [`network/openwrt/`](../network/openwrt/)。DNS 记录从 8 条 `uci add` 改为 Git 里的
@@ -353,6 +355,19 @@ Mac（`dscacheutil`）、节点（`resolvectl`）、路由器上 lab.internal �
 配置漂移演示（可选，未在本次记录中执行）：路由器上手工 `uci set dropbear.@dropbear[0].PasswordAuth='on'; uci commit dropbear`，
 `--check` 应报告 `CHANGED: dropbear.@dropbear[0].PasswordAuth 'on' -> 'off'`，正式执行即修正。
 
+## 验收
+
+[`scripts/verify-network.sh`](../scripts/verify-network.sh)：在 Mac 上执行（兼容 bash 3.2），经 SSH 别名检查路由器、4 台节点与集群，29 项全部通过。
+
+| 类别 | 检查内容 |
+| --- | --- |
+| BGP | 3 个邻居 Established；每个邻居都收到前缀；路由器不向集群宣告（PfxSnt 全 0）；ECMP 哈希策略与重定向内核参数 |
+| ECMP | `10.200.0.0/24` 下一跳恰为 3 台 worker（无 master）；Local 服务 `10.200.0.20` 下一跳恰为有 Pod 的节点；Mac 20 次请求分布到 2 个 Pod |
+| LoadBalancer | grafana-lb = .10、argocd-server-lb = .11；Mac 访问 Grafana 健康检查与 ArgoCD `/healthz` |
+| 监控 | exporter `frr_bgp_up 1`；Prometheus 抓取成功；没有正在触发的 FRR 告警 |
+| DNS | 路由器应答与 NXDOMAIN；4 台节点 delegate 与公网解析；Pod 内（CoreDNS）；Mac（/etc/resolver） |
+| 卫生 | 4 台节点无 RA/DHCPv6 残留地址；Ansible `--check` 为 `changed=0`（路由器与仓库一致） |
+
 ## 踩坑记录
 
 1. **Fusion DNS 让 dnsmasq 解析为空**：见 4.1，上游改为节点 resolved。dnsmasq 日志里的 `refused to do a recursive query` 是线索。
@@ -374,3 +389,10 @@ Mac（`dscacheutil`）、节点（`resolvectl`）、路由器上 lab.internal �
 - [ ] BGP 会话与前缀数接入 Prometheus 告警（4.7 自写 exporter）。
 - [ ] 路由器配置由 Ansible 管理并纳入 CI 校验（4.7）。
 - [ ] Grafana、argocd-server、Alertmanager 目前单副本且都在 worker-3 上，节点故障时管理界面全部不可用；可加副本或反亲和。
+- [ ] 在实验网内用只读方式定时执行 `ansible-playbook --check`，发现配置漂移即告警（不自动修改，保留人工审批）。
+- [ ] Alertmanager 也给一个 LoadBalancer 入口（`alertmanager.lab.internal`），并配置通知渠道。
+- [ ] Calico 节点数增多后，节点间 iBGP 全互联改为路由反射器。
+
+## 下一步
+
+阶段 5：Terraform 公有云。
