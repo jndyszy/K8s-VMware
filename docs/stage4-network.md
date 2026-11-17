@@ -319,6 +319,40 @@ kubectl apply -f platform/monitoring/frr-router-scrapeconfig.yaml \
 告警时延构成：抓取间隔 15 秒 + 规则评估间隔 30 秒（chart 默认）+ `for` 30 秒，约 1 分钟。BGP 自身 9 秒收敛，**告警是给人看的，不在业务恢复路径上**；
 如需更快感知可缩短评估间隔，代价是 Prometheus 负载。
 
+## 4.7 Ansible 管理路由器配置
+
+[`network/ansible/`](../network/ansible/)：`group_vars/openwrt.yml` 描述期望状态（软件包、文件放哪里、uci 各项取值），
+文件内容在 [`network/openwrt/`](../network/openwrt/)。DNS 记录从 8 条 `uci add` 改为 Git 里的
+[`lab-internal.hosts`](../network/openwrt/lab-internal.hosts)（dnsmasq `addn-hosts`），新增服务只改一行。
+
+**控制节点放在 k8s-master**（不是 Mac）：apt 安装 `ansible-core`，生成只授权给路由器的专用密钥，从 Mac 中转授权（路由器已关闭密码登录）：
+
+```bash
+apt-get install -y ansible-core                                                     # master
+ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519_frr -N '' -C 'ansible@k8s-master -> frr-router'
+# /root/.ssh/config 加 Host frr-router（HostName 10.10.10.20、User root、IdentityFile 上面的密钥）
+ssh k8s-master 'cat /root/.ssh/id_ed25519_frr.pub' | ssh frr-router 'cat >> /etc/dropbear/authorized_keys'   # Mac
+
+cd /root/K8s-VMware/network/ansible
+ansible-playbook openwrt.yml --check     # 只报告差异
+ansible-playbook openwrt.yml             # 应用；再执行一次应为 changed=0
+```
+
+| 选择 | 原因 |
+| --- | --- |
+| 全部用 `raw` 模块 | OpenWrt 没有 Python，copy/template/lineinfile 等模块都依赖远端 Python；文件用控制节点的 `scp -O` 上传 |
+| 自己实现 check 模式 | `raw` 在 `--check` 下默认直接跳过，看不到任何差异；修改类任务在 check 模式下照常运行、只打印 `CHANGED:` 不修改 |
+| 按需生效 | 只有 frr.conf 变了才重启 FRR（会重建全部 BGP 会话）；只有 hosts 文件变了只 `reload` dnsmasq |
+| 不管理网络接口 | Ansible 依赖 10.10.10.20 连接路由器，改错地址会把自己锁在外面；接口在 4.1 由控制台完成 |
+| 专用密钥 | 只授权给路由器，撤销时删 `authorized_keys` 一行即可，不影响其他访问 |
+
+首次执行结果：上传 hosts 文件、`sysupgrade.conf` 加一行、uci 新增 `addnhosts`、删除 4.6 手工添加的 8 个 domain 段；
+frr.conf 等文件无差异，BGP 未受影响（`established=3`、`lb_nexthops=3`）。第二次执行 `changed=0`。
+Mac（`dscacheutil`）、节点（`resolvectl`）、路由器上 lab.internal 解析均正常。
+
+配置漂移演示：路由器上手工 `uci set dropbear.@dropbear[0].PasswordAuth='on'; uci commit dropbear`，
+`--check` 报告 `CHANGED: dropbear.@dropbear[0].PasswordAuth 'on' -> 'off'`，正式执行即修正。
+
 ## 踩坑记录
 
 1. **Fusion DNS 让 dnsmasq 解析为空**：见 4.1，上游改为节点 resolved。dnsmasq 日志里的 `refused to do a recursive query` 是线索。
@@ -329,7 +363,10 @@ kubectl apply -f platform/monitoring/frr-router-scrapeconfig.yaml \
 5. **BusyBox `ip` 看不到 ECMP**：多路径路由只显示第一行，装 `ip-full`。
 6. **Rogue RA**：OpenWrt 出厂 RA/DHCPv6 让节点拿到 IPv6 地址和失效的 DNS 服务器，见 4.6。
 7. **resolved 全局 DNS 作用域总是默认路由**：split DNS 要用 DNS delegate，见 4.6。
-8. **在错误的机器上执行命令**：`vtysh` 在 k8s-master 上报 not found——看提示符（`root@frr-router` / `root@k8s-master`）。
+8. **OpenWrt 的 BusyBox 没有 `stat`**：playbook 首次 `--check` 报告 5 个文件全有差异，其实哈希一致，是读权限的 `stat` 不存在；
+   改用 `ls -l` 权限位换算八进制。连基础命令都可能被裁掉，脚本要在目标设备上实测。
+9. **dnsmasq 重启后立即查询会失败**：验证步骤需要重试等待一两秒。
+10. **在错误的机器上执行命令**：`vtysh` 在 k8s-master 上报 not found——看提示符（`root@frr-router` / `root@k8s-master`）。
 
 ## 改进项
 
