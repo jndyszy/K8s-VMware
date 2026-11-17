@@ -1,0 +1,52 @@
+# 阶段 4.7：frr-router 期望状态。文件内容在 network/openwrt/，这里只描述"放到哪里、改了之后做什么"。
+# 网络接口（network.lan.*）不在这里管理：Ansible 要靠 10.10.10.20 才能连上路由器，改错地址会把自己锁在外面，
+# 接口配置在 4.1 由控制台一次性完成（见 docs/stage4-network.md）。
+
+openwrt_packages:
+  - frr
+  - frr-bgpd
+  - frr-zebra
+  - frr-watchfrr
+  - ip-full
+
+# 本地文件 → 路由器路径；handler 为空表示不需要重启
+openwrt_files:
+  - { src: ../openwrt/frr.conf, dest: /etc/frr/frr.conf, mode: "600", handler: restart frr }
+  - { src: ../openwrt/vtysh.conf, dest: /etc/frr/vtysh.conf, mode: "600", handler: restart frr }
+  - { src: ../openwrt/90-lab-router.conf, dest: /etc/sysctl.d/90-lab-router.conf, mode: "644", handler: apply sysctl }
+  - { src: ../openwrt/bgp-metrics.cgi, dest: /www/cgi-bin/bgp-metrics, mode: "755", handler: "" }
+  - { src: ../openwrt/lab-internal.hosts, dest: /etc/lab-internal.hosts, mode: "644", handler: reload dnsmasq }
+
+# 固件升级（sysupgrade）时保留的文件
+openwrt_sysupgrade_keep:
+  - /etc/frr/
+  - /etc/sysctl.d/90-lab-router.conf
+  - /www/cgi-bin/bgp-metrics
+  - /etc/lab-internal.hosts
+
+# uci 期望值：按配置包分组，任何一项不同就修改、commit 并触发对应 handler
+openwrt_uci:
+  system:
+    handler: reload system
+    options:
+      system.@system[0].hostname: frr-router
+    lists: {}
+  dhcp:
+    handler: restart dnsmasq
+    options:
+      dhcp.lan.ignore: "1"
+      dhcp.lan.ra: disabled
+      dhcp.lan.dhcpv6: disabled
+      dhcp.@dnsmasq[0].noresolv: "1"
+      dhcp.@dnsmasq[0].local: /lab.internal/
+      dhcp.@dnsmasq[0].domain: lab.internal
+    lists:
+      # dnsmasq 上游 = 4 台节点 IP 上的 systemd-resolved（Fusion NAT DNS 处理不了 EDNS）
+      dhcp.@dnsmasq[0].server: [10.10.10.10, 10.10.10.11, 10.10.10.12, 10.10.10.13]
+      dhcp.@dnsmasq[0].addnhosts: [/etc/lab-internal.hosts]
+  dropbear:
+    handler: restart dropbear
+    options:
+      dropbear.@dropbear[0].PasswordAuth: "off"
+      dropbear.@dropbear[0].RootPasswordAuth: "off"
+    lists: {}

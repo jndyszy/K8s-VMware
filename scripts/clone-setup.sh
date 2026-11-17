@@ -53,6 +53,10 @@ network:
   ethernets:
     ${IFACE}:
       dhcp4: false
+      # 不接受 RA、不跑 DHCPv6：vmnet2 是静态规划，阶段 4 曾因 OpenWrt 出厂开着 RA/DHCPv6，
+      # 节点拿到 ULA 地址并把路由器的 IPv6 地址加进了 DNS 服务器列表
+      dhcp6: false
+      accept-ra: false
       addresses: [${IP}/24]
       routes:
         - to: default
@@ -66,6 +70,11 @@ chmod 600 /etc/netplan/50-static.yaml
 #    Fusion NAT 的 DNS 处理不了 EDNS（返回畸形报文），resolved 会自动降级重试，CoreDNS 不会
 mkdir -p /etc/systemd/resolved.conf.d
 printf '[Resolve]\nDNSStubListenerExtra=%s\n' "$IP" >/etc/systemd/resolved.conf.d/k8s-node-dns.conf
+
+# 7. 阶段 4 split DNS：只有 *.lab.internal 交给 OpenWrt dnsmasq（systemd 258+ 的 DNS delegate，DefaultRoute 默认关闭）
+#    不能写进 resolved.conf 的全局 DNS=：全局作用域总是默认路由，公网查询也会发给 .20，而 dnsmasq 上游又是节点 resolved，形成环路
+mkdir -p /etc/systemd/dns-delegate.d
+printf '[Delegate]\nDNS=10.10.10.20\nDomains=~lab.internal\n' >/etc/systemd/dns-delegate.d/lab-internal.dns-delegate
 
 echo "==> machine-id:   $(cat /etc/machine-id)"
 echo "==> product_uuid: $(cat /sys/class/dmi/id/product_uuid)"

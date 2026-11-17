@@ -1,0 +1,20 @@
+# 阶段 4.7：Prometheus 抓取 frr-router 上的 BGP 指标（network/openwrt/bgp-metrics.cgi）
+# ScrapeConfig 是 Prometheus Operator 的 CRD，用于抓取集群外的静态目标；
+# 标签 release: kps 匹配 Prometheus 的 scrapeConfigSelector（chart 默认值），无需改 Helm values。
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: frr-router
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  jobName: frr-router
+  scrapeInterval: 15s
+  scrapeTimeout: 5s
+  metricsPath: /cgi-bin/bgp-metrics
+  staticConfigs:
+    - targets:
+        - 10.10.10.20:80
+      labels:
+        instance: frr-router

@@ -1,0 +1,20 @@
+# 阶段 4：ArgoCD 的 LoadBalancer 入口（固定 IP 10.200.0.11，4.6 起解析为 argocd.lab.internal）
+# 单独建 Service 而不改上游 install.yaml 里的 argocd-server：重新 apply 上游清单不会覆盖对外入口。
+# argocd-server 在 8080 同时处理 HTTP 与 HTTPS（自签证书），这里只暴露 443。
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-server-lb
+  namespace: argocd
+  annotations:
+    projectcalico.org/loadBalancerIPs: '["10.200.0.11"]'
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: argocd-server
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8080
+      protocol: TCP

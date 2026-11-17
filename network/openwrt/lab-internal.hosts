@@ -1,0 +1,11 @@
+# 阶段 4.6：lab.internal 区域记录（dnsmasq addn-hosts，由 network/ansible 推送到 frr-router:/etc/lab-internal.hosts）
+# 服务入口：Calico LoadBalancer IP（platform/*/…-lb.yaml、tests/stage4/）
+10.200.0.10  grafana.lab.internal
+10.200.0.11  argocd.lab.internal
+10.200.0.20  lab-api.lab.internal
+# 设备
+10.10.10.20  frr-router.lab.internal
+10.10.10.10  k8s-master.lab.internal
+10.10.10.11  k8s-worker-1.lab.internal
+10.10.10.12  k8s-worker-2.lab.internal
+10.10.10.13  k8s-worker-3.lab.internal

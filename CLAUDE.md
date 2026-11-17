@@ -22,8 +22,9 @@
 | frr-router | 10.10.10.20，**OpenWrt**（不是 Ubuntu），单臂路由，只挂 vmnet2，不作为节点默认网关 |
 | Pod CIDR | 10.244.0.0/16（kubeadm podSubnet 与 Calico IPPool 必须一致） |
 | Service CIDR | 10.96.0.0/12 |
-| DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；CoreDNS 上游 = 4 台节点 IP 上的 systemd-resolved（`DNSStubListenerExtra`，见 `platform/coredns/`）；阶段 4 起：OpenWrt dnsmasq 提供 `lab.internal` 区域，节点 DNS 主 10.10.10.20、备 10.10.10.2 |
-| LoadBalancer 池 | 10.200.0.0/24（MetalLB 只分配 IP，由 Calico BGP 宣告） |
+| DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；CoreDNS 上游 = 4 台节点 IP 上的 systemd-resolved（`DNSStubListenerExtra`，见 `platform/coredns/`）；阶段 4 起 split DNS：OpenWrt dnsmasq 只应答 `lab.internal`，节点 resolved 用 DNS delegate（`/etc/systemd/dns-delegate.d/lab-internal.dns-delegate`，`Domains=~lab.internal`）只把该域发给 10.10.10.20，其余仍走 10.10.10.2；Mac 用 `/etc/resolver/lab.internal`；dnsmasq 上游 = 4 台节点上的 resolved |
+| LoadBalancer 池 | 10.200.0.0/24，Calico 原生 LB IPAM（IPPool `loadbalancer-ipv4`，`allowedUses: [LoadBalancer]`），由 `BGPConfiguration.serviceLoadBalancerIPs` 宣告；未使用 MetalLB；固定 IP 用注解 `projectcalico.org/loadBalancerIPs`（grafana .10、argocd .11、lab-api 验收 .20） |
+| BGP 拓扑 | 只有 3 台 worker 与 frr-router 建 eBGP（BGPPeer `nodeSelector`），master 不进 LB 数据路径；BGPFilter `export-local-only` 只宣告本节点路由；FRR `timers 3 9`、`maximum-paths 8`、出方向全拒；Mac 访问需一次性 `sudo route -n add -net 10.200.0.0/24 10.10.10.20` |
 | BGP | 集群 AS 64512，OpenWrt/FRR AS 64500 |
 | 容器运行时 | containerd 2.x（Ubuntu 26.04 apt 自带），SystemdCgroup = true，certs.d 目录式配置；配置文件为 2.x 结构（pause 键名 `sandbox`，字符串用单引号），脚本需同时兼容 1.x |
 | CNI | Calico（Tigera Operator），BGP 直接路由，encapsulation: None |
@@ -47,29 +48,35 @@ Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**脚本、�
 - [x] 阶段 1：kubeadm 集群、Calico、存储、DNS、NetworkPolicy（K8s v1.37.2、Calico v3.33.0，验收全部通过，见 docs/stage1-cluster.md）
 - [x] 阶段 2：lab-api、GitHub Actions、ArgoCD（push lab-api → CI 构建推送 Harbor → 写回 newTag → ArgoCD 自动部署，见 docs/stage2-gitops.md）
 - [x] 阶段 3：kube-prometheus-stack、告警、SLO、集中日志（可用性 99.5% / 延迟 99%@250ms，多窗口燃烧率告警，故障演练，Loki + Alloy，见 docs/stage3-observability.md）
-- [ ] 阶段 4：OpenWrt + FRR 与 Calico eBGP、ECMP、内部 DNS（lab.internal）、网络自动化
+- [x] 阶段 4：OpenWrt + FRR 与 Calico eBGP、ECMP、内部 DNS（lab.internal）、网络自动化（verify-network.sh 29/29，故障演练 9 秒收敛，见 docs/stage4-network.md）
 - [ ] 阶段 5：Terraform 公有云
 
 完成一个阶段后，更新这里和 README 的进度表。
 
 ## 关键设计决策（附原因）
 
-- **Calico 与 MetalLB 不能同时跑 BGP**：两者都要监听 TCP 179。MetalLB 只建 IPAddressPool、关闭 speaker，
-  由 Calico `BGPConfiguration.serviceLoadBalancerIPs` 宣告 LB IP。
+- **LoadBalancer 用 Calico 原生 IPAM，不用 MetalLB**：两者的 BGP 都要监听 TCP 179；MetalLB v0.16 起默认启用 frr-k8s，
+  仅关 speaker 不够。Calico 3.29+ 自带 LB IPAM，calico-kube-controllers 已在运行，分配与宣告在同一系统，少一个组件。
+- **BGPFilter 只宣告本地路由**：Calico 对外部邻居启用 ADD-PATH，会把经 iBGP 学到的其他节点路径（含 master）转发给路由器，
+  节点故障时撤销要等 iBGP 超时；过滤后路由器每条路径只来自"下一跳本人"的会话，9 秒内收敛。修改 BGPPeer filters 会重置所有会话。
 - **OpenWrt 上的 FRR**：用 opkg 安装（25.x 起为 apk）。接口必须在 `lan` 防火墙区域（wan 区域 input 默认
   REJECT 会挡住 179）。`dhcp.lan.ignore=1`。需要 `net.ipv4.fib_multipath_hash_policy=1`（否则 ECMP 对单一
   客户端只走一条路径）和 `send_redirects=0`（单臂转发时防止 Mac 被重定向绕过路由器）。
-- **OpenWrt 没有 Python**：Ansible 用 `raw` 模块或无 Python 的 OpenWrt 角色；Netmiko 用 `device_type="linux"`。
-  BGP 监控没有现成 frr_exporter 包，计划用 Python 自写 exporter（SSH 执行 `vtysh -c 'show bgp summary json'`）。
+- **OpenWrt 没有 Python（BusyBox 还缺 `stat` 等命令）**：Ansible 控制节点在 k8s-master（`network/ansible/`，专用密钥
+  `/root/.ssh/id_ed25519_frr`），全部用 `raw` 模块并自己实现 check 模式，改动前先 `--check`，执行后应 `changed=0`。
+  BGP 监控用路由器上的 uhttpd CGI（`network/openwrt/bgp-metrics.cgi`，ash + jshn），Prometheus 经 ScrapeConfig 拉取，凭据不出路由器。
+  lab.internal 记录在 `network/openwrt/lab-internal.hosts`（dnsmasq addn-hosts），由 Ansible 推送。
 - **代码与配置分两个仓库**：CI 回写本仓库更新镜像 tag，不会反向触发 lab-api 的流水线。
 - **节点默认网关是 Fusion NAT（.2），不是 OpenWrt**：阶段 0–3 不依赖路由器。
-- **Fusion NAT 的 DNS 不支持 EDNS**：带 EDNS 的查询会收到畸形报文，且不支持 TCP。systemd-resolved 会降级重试，CoreDNS 和
+- **Fusion NAT 的 DNS 不支持 EDNS**：它不是转发器，而是把查询交给 macOS 解析后自己拼应答（flags 只有 `qr aa`，没有 `ra`）。
+  带 EDNS 的查询会收到畸形报文（末尾多 16 字节），且不支持 TCP；与 fake-ip 无关。systemd-resolved 会降级重试，CoreDNS 和
   dnsmasq 不会。所以 CoreDNS 不直接转发给 10.10.10.2，而是转发给各节点 IP 上的 resolved；`kubeadm upgrade` 后要重新应用
-  `platform/coredns/configmap.yaml`；阶段 4 的 dnsmasq 也不能直接以 10.10.10.2 为上游。
+  `platform/coredns/configmap.yaml`；OpenWrt dnsmasq 同样不能以 10.10.10.2 为上游（实测解析为空，日志 `refused to do a recursive query`），上游改为 4 台节点上的 resolved（`noresolv=1` + 4 个 `server`）。
 - **内部 DNS 只做增强，`/etc/hosts` 始终兜底**：`controlPlaneEndpoint` 是 `k8s-master:6443`，kubelet/kube-proxy 每次
   重连都要解析它，DNS 一挂节点就 NotReady。所以节点名永远写在 `/etc/hosts`（nsswitch `files dns`，本地优先），
-  OpenWrt 的 dnsmasq 只提供额外名字（`*.lab.internal`，如 grafana/argocd 指向 LoadBalancer IP），上游转发 10.10.10.2；
-  节点 DNS 配主 .20、备 .2，路由器宕机时仍能解析公网。后缀用 `.internal`（ICANN 2024 年保留给内网），
+  OpenWrt 的 dnsmasq 只提供额外名字（`*.lab.internal`，如 grafana/argocd 指向 LoadBalancer IP）。
+  采用 split DNS 而不是"主 .20、备 .2"：dnsmasq 上游是节点 resolved，主备方案会形成 resolved → dnsmasq → resolved 环路；
+  按域名分流后路由器宕机只影响 `*.lab.internal`，公网解析不经过路由器、也不用等主 DNS 超时。后缀用 `.internal`（ICANN 2024 年保留给内网），
   不用 `.local`（被 mDNS 占用，macOS 解析会出问题）。
 
 ## 编码约定
@@ -99,9 +106,9 @@ Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**脚本、�
 ```text
 scripts/      节点与集群的初始化、验收脚本
 kubeadm/      kubeadm 配置
-platform/     平台组件（calico、metrics-server、monitoring、argocd、metallb……）
+platform/     平台组件（calico、coredns、metrics-server、monitoring、logging、argocd）
 apps/         ArgoCD 管理的应用（阶段 2 起）
-network/      OpenWrt 配置、FRR 配置、网络自动化（阶段 4）
+network/      OpenWrt 配置（openwrt/）、Ansible（ansible/）（阶段 4）
 terraform/    阶段 5
 tests/        各阶段验收资源
 docs/         实验手册 plan.md、复盘 postmortems/、截图 images/

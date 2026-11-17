@@ -1,0 +1,191 @@
+# 阶段 4.7：frr-router（OpenWrt 25.12）配置管理
+#
+# 控制节点：k8s-master（root），apt 安装 ansible-core；/root/.ssh/config 中的 frr-router 别名使用专用密钥
+#   /root/.ssh/id_ed25519_frr（只授权给路由器，见 docs/stage4-network.md）。
+#   cd network/ansible
+#   ansible-playbook openwrt.yml --check     # 只报告差异，不做任何修改
+#   ansible-playbook openwrt.yml             # 应用；第二次执行应为 changed=0（幂等）
+#
+# OpenWrt 没有 Python，Ansible 的常规模块（copy、template、lineinfile……）都依赖远端 Python，
+# 所以这里全部用 raw 模块执行远端 sh，文件用控制节点上的 scp -O 上传（dropbear 没有 sftp-server）。
+# 每个修改类任务自己实现 check 模式：check 模式下照常运行、只打印 "CHANGED: ..." 而不修改，
+# 因此 --check 能真实反映差异（raw 默认在 check 模式下直接跳过，什么也看不到）。
+- name: frr-router 配置
+  hosts: openwrt
+  gather_facts: false
+  vars:
+    dry: "{{ ansible_check_mode | ternary(1, 0) }}"
+
+  tasks:
+    - name: 确认目标是 OpenWrt
+      ansible.builtin.raw: grep -E "^DISTRIB_(RELEASE|TARGET)=" /etc/openwrt_release
+      register: release
+      changed_when: false
+      check_mode: false
+
+    - name: 软件包
+      ansible.builtin.raw: |
+        missing=""
+        for p in {{ openwrt_packages | join(' ') }}; do apk info -e "$p" >/dev/null 2>&1 || missing="$missing $p"; done
+        [ -z "$missing" ] && exit 0
+        echo "CHANGED: 安装$missing"
+        [ "{{ dry }}" = 1 ] || apk add $missing
+      register: pkgs
+      changed_when: "'CHANGED' in pkgs.stdout"
+      check_mode: false
+
+    - name: FRR 启用 bgpd、开机自启；停用 odhcpd（单臂路由器不发 RA/DHCPv6）
+      ansible.builtin.raw: |
+        grep -q '^bgpd=yes' /etc/frr/daemons || { echo "CHANGED: daemons bgpd=yes"; [ "{{ dry }}" = 1 ] || sed -i 's/^bgpd=no/bgpd=yes/' /etc/frr/daemons; }
+        /etc/init.d/frr enabled || { echo "CHANGED: enable frr"; [ "{{ dry }}" = 1 ] || /etc/init.d/frr enable; }
+        if /etc/init.d/odhcpd enabled 2>/dev/null; then
+          echo "CHANGED: disable odhcpd"
+          [ "{{ dry }}" = 1 ] || { /etc/init.d/odhcpd stop; /etc/init.d/odhcpd disable; }
+        fi
+        exit 0
+      register: services
+      changed_when: "'CHANGED' in services.stdout"
+      check_mode: false
+
+    - name: 计算本地文件哈希
+      # Linux 用 sha256sum，macOS 用 shasum，两者输出格式相同
+      ansible.builtin.shell: sha256sum "{{ playbook_dir }}/{{ item.src }}" 2>/dev/null || shasum -a 256 "{{ playbook_dir }}/{{ item.src }}"
+      loop: "{{ openwrt_files }}"
+      register: local_sha
+      delegate_to: localhost
+      changed_when: false
+      check_mode: false
+
+    - name: 读取路由器上的文件哈希与权限
+      ansible.builtin.raw: |
+        [ -f '{{ item.dest }}' ] || exit 0
+        sha256sum '{{ item.dest }}' | cut -d' ' -f1
+        # OpenWrt 的 BusyBox 没有 stat，用 ls -l 的权限位换算成八进制（-rwxr-xr-x → 755；不处理 suid/sticky）
+        ls -l '{{ item.dest }}' | awk '{p=$1; m=0; for(i=2;i<=10;i++) m=m*2+(substr(p,i,1)!="-"); printf "%o\n", m}'
+      loop: "{{ openwrt_files }}"
+      register: remote_sha
+      changed_when: false
+      check_mode: false
+
+    - name: 上传有差异的文件
+      # item.0 = 文件定义，item.1 = 本地哈希，item.2 = 远端 "哈希\n权限"
+      ansible.builtin.command: >-
+        {{ 'true' if ansible_check_mode else
+           'sh -c "scp -O -q ' ~ (playbook_dir ~ '/' ~ item.0.src) | quote ~ ' ' ~ inventory_hostname ~ ':' ~ item.0.dest ~
+           ' && ssh ' ~ inventory_hostname ~ ' chmod ' ~ item.0.mode ~ ' ' ~ item.0.dest ~ '"' }}
+      loop: "{{ openwrt_files | zip(local_sha.results, remote_sha.results) | list }}"
+      loop_control:
+        label: "{{ item.0.dest }}"
+      when: >-
+        (item.2.stdout_lines | length < 2) or
+        (item.1.stdout.split()[0] != item.2.stdout_lines[0]) or
+        (item.0.mode != item.2.stdout_lines[1])
+      register: upload
+      delegate_to: localhost
+      changed_when: true
+      check_mode: false
+
+    - name: sysupgrade 时保留的文件
+      ansible.builtin.raw: |
+        for f in {{ openwrt_sysupgrade_keep | join(' ') }}; do
+          grep -qxF "$f" /etc/sysupgrade.conf || { echo "CHANGED: sysupgrade.conf + $f"; [ "{{ dry }}" = 1 ] || echo "$f" >> /etc/sysupgrade.conf; }
+        done
+        exit 0
+      register: keep
+      changed_when: "'CHANGED' in keep.stdout"
+      check_mode: false
+
+    - name: uci 期望值
+      ansible.builtin.raw: |
+        DRY={{ dry }}; changed=0
+        setopt() {
+          cur=$(uci -q get "$1"); [ "$cur" = "$2" ] && return 0
+          echo "CHANGED: $1 '$cur' -> '$2'"; changed=1
+          [ "$DRY" = 1 ] || uci set "$1=$2"
+        }
+        setlist() {
+          k=$1; shift; cur=$(uci -q get "$k"); [ "$cur" = "$*" ] && return 0
+          echo "CHANGED: $k '$cur' -> '$*'"; changed=1
+          [ "$DRY" = 1 ] && return 0
+          uci -q delete "$k"; for v in "$@"; do uci add_list "$k=$v"; done
+        }
+        {% for k, v in item.value.options.items() %}
+        setopt '{{ k }}' '{{ v }}'
+        {% endfor %}
+        {% for k, v in item.value.lists.items() %}
+        setlist '{{ k }}' {{ v | map('quote') | join(' ') }}
+        {% endfor %}
+        {% if item.key == 'dhcp' %}
+        # 记录改由 addn-hosts 文件（network/openwrt/lab-internal.hosts）提供，清理 4.6 手工添加的 uci domain 段
+        while uci -q get 'dhcp.@domain[0]' >/dev/null; do
+          echo "CHANGED: delete dhcp.@domain[0] $(uci -q get 'dhcp.@domain[0].name')"; changed=1
+          [ "$DRY" = 1 ] && break
+          uci delete 'dhcp.@domain[0]'
+        done
+        {% endif %}
+        if [ "$changed" = 1 ] && [ "$DRY" != 1 ]; then uci commit {{ item.key }}; fi
+        exit 0
+      loop: "{{ openwrt_uci | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: uci
+      changed_when: "'CHANGED' in uci.stdout"
+      check_mode: false
+
+    # ---------- 按需让改动生效（check 模式下不执行）----------
+    - name: 汇总需要重启/重载的服务
+      ansible.builtin.set_fact:
+        file_handlers: "{{ upload.results | selectattr('changed', 'defined') | selectattr('changed') | map(attribute='item.0.handler') | list }}"
+        uci_handlers: "{{ uci.results | selectattr('changed') | map(attribute='item.value.handler') | list }}"
+
+    - name: 重启 FRR（注意：所有 BGP 会话会重建，约 10 秒内恢复）
+      ansible.builtin.raw: /etc/init.d/frr restart
+      when: not ansible_check_mode and (pkgs.changed or services.changed or 'restart frr' in file_handlers)
+
+    - name: 应用内核参数
+      ansible.builtin.raw: sysctl -p /etc/sysctl.d/90-lab-router.conf
+      when: not ansible_check_mode and 'apply sysctl' in file_handlers
+
+    - name: 重启 dnsmasq（uci 有变化）
+      ansible.builtin.raw: /etc/init.d/dnsmasq restart
+      when: not ansible_check_mode and 'restart dnsmasq' in uci_handlers
+
+    - name: 重载 dnsmasq（只有 hosts 文件变化，SIGHUP 重新读取 addn-hosts）
+      ansible.builtin.raw: /etc/init.d/dnsmasq reload
+      when: not ansible_check_mode and 'reload dnsmasq' in file_handlers and 'restart dnsmasq' not in uci_handlers
+
+    - name: 重启 dropbear
+      ansible.builtin.raw: /etc/init.d/dropbear restart
+      when: not ansible_check_mode and 'restart dropbear' in uci_handlers
+
+    - name: 重载 system（主机名）
+      ansible.builtin.raw: /etc/init.d/system reload
+      when: not ansible_check_mode and 'reload system' in uci_handlers
+
+    # ---------- 验证 ----------
+    - name: 验证 BGP、ECMP 与 DNS
+      ansible.builtin.raw: |
+        sleep {{ 12 if (not ansible_check_mode and (pkgs.changed or services.changed or 'restart frr' in file_handlers)) else 0 }}
+        echo "established=$(vtysh -c 'show bgp ipv4 unicast summary json' | jsonfilter -e '@.peers[*].state' | grep -c Established)"
+        echo "lb_nexthops=$(ip route show 10.200.0.0/24 | grep -c 'nexthop via')"
+        # dnsmasq 刚重启时需要一两秒才开始应答，最多重试 5 次
+        for i in 1 2 3 4 5; do
+          ip=$(nslookup grafana.lab.internal 127.0.0.1 2>/dev/null | awk '/^Address/ && !/:53/ {print $2}' | tail -1)
+          [ -n "$ip" ] && break; sleep 1
+        done
+        echo "grafana=$ip"
+      register: verify
+      changed_when: false
+      check_mode: false
+
+    - name: 变更明细（check 模式下为"将要做的修改"）
+      ansible.builtin.debug:
+        msg: >-
+          {{ (pkgs.stdout_lines + services.stdout_lines + keep.stdout_lines
+              + (uci.results | map(attribute='stdout_lines') | flatten)) | select('match', 'CHANGED') | list
+             + (upload.results | selectattr('changed', 'defined') | selectattr('changed')
+                | map(attribute='item.0.dest') | map('regex_replace', '^', 'CHANGED: 上传 ') | list) }}
+
+    - name: 结果
+      ansible.builtin.debug:
+        msg: "{{ release.stdout_lines + verify.stdout_lines }}"

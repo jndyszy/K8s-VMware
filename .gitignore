@@ -35,4 +35,4 @@ secrets/
 .vscode/
 
 # ===== 测试生成物 =====
-tests/stage3/*.prom.yaml
+tests/*/*.prom.yaml

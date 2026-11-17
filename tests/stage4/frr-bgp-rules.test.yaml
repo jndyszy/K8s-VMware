@@ -1,0 +1,98 @@
+# frr-router BGP 告警规则单元测试（阶段 4.7）：
+#   scripts/extract-prom-rules.sh platform/monitoring/frr-bgp-rules.yaml > tests/stage4/frr-bgp-rules.prom.yaml
+#   promtool test rules tests/stage4/frr-bgp-rules.test.yaml
+# 与阶段 3 相同：触发类断言检查 ALERTS 序列（alert_rule_test 会逐字比较 annotations，模板展开后难以维护）；
+# 不触发类断言用 alert_rule_test + 空的 exp_alerts。
+rule_files:
+  - frr-bgp-rules.prom.yaml
+evaluation_interval: 15s
+tests:
+  # 1. 健康状态：3 个邻居 Established、各有前缀、ECMP 3 路 → 没有任何告警
+  - interval: 15s
+    input_series:
+      - series: 'up{job="frr-router", instance="frr-router"}'
+        values: '1x20'
+      - series: 'frr_bgp_up{job="frr-router", instance="frr-router"}'
+        values: '1x20'
+      - series: 'frr_bgp_peer_up{job="frr-router", instance="frr-router", peer="10.10.10.11", remote_as="64512"}'
+        values: '1x20'
+      - series: 'frr_bgp_peer_prefixes_received{job="frr-router", instance="frr-router", peer="10.10.10.11"}'
+        values: '2x20'
+      - series: 'frr_route_nexthops{job="frr-router", instance="frr-router", prefix="10.200.0.0/24"}'
+        values: '3x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: FrrBgpPeerDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: FrrBgpPeerNoPrefixes
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: FrrLoadBalancerEcmpDegraded
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: FrrExporterDown
+        exp_alerts: []
+
+  # 2. worker-3 断开：t=30s 起 peer_up=0；for 30s → t=60s 触发，t=45s 仍为 pending
+  #    同时 LB 地址池只剩 2 条下一跳；for 1m → t=90s 触发
+  - interval: 15s
+    input_series:
+      - series: 'frr_bgp_peer_up{job="frr-router", instance="frr-router", peer="10.10.10.13", remote_as="64512"}'
+        values: '1 1 0 0 0 0 0 0 0 0'
+      - series: 'frr_route_nexthops{job="frr-router", instance="frr-router", prefix="10.200.0.0/24"}'
+        values: '3 3 2 2 2 2 2 2 2 2'
+    promql_expr_test:
+      - expr: ALERTS{alertname="FrrBgpPeerDown"}
+        eval_time: 45s
+        exp_samples:
+          - labels: 'ALERTS{alertname="FrrBgpPeerDown", alertstate="pending", job="frr-router", instance="frr-router", peer="10.10.10.13", remote_as="64512", severity="critical"}'
+            value: 1
+      - expr: ALERTS{alertname="FrrBgpPeerDown"}
+        eval_time: 60s
+        exp_samples:
+          - labels: 'ALERTS{alertname="FrrBgpPeerDown", alertstate="firing", job="frr-router", instance="frr-router", peer="10.10.10.13", remote_as="64512", severity="critical"}'
+            value: 1
+      - expr: ALERTS{alertname="FrrLoadBalancerEcmpDegraded", alertstate="firing"}
+        eval_time: 90s
+        exp_samples:
+          - labels: 'ALERTS{alertname="FrrLoadBalancerEcmpDegraded", alertstate="firing", job="frr-router", instance="frr-router", prefix="10.200.0.0/24", severity="warning"}'
+            value: 1
+
+  # 3. 会话正常但前缀数为 0（例如出口过滤写错）→ for 2m 后触发
+  - interval: 15s
+    input_series:
+      - series: 'frr_bgp_peer_up{job="frr-router", instance="frr-router", peer="10.10.10.11", remote_as="64512"}'
+        values: '1x20'
+      - series: 'frr_bgp_peer_prefixes_received{job="frr-router", instance="frr-router", peer="10.10.10.11"}'
+        values: '0x20'
+    promql_expr_test:
+      - expr: ALERTS{alertname="FrrBgpPeerNoPrefixes", alertstate="firing"}
+        eval_time: 3m
+        exp_samples:
+          - labels: 'ALERTS{alertname="FrrBgpPeerNoPrefixes", alertstate="firing", job="frr-router", instance="frr-router", peer="10.10.10.11", remote_as="64512", severity="warning"}'
+            value: 1
+
+  # 4. 抓取失败（路由器宕机）→ for 1m 后触发
+  - interval: 15s
+    input_series:
+      - series: 'up{job="frr-router", instance="frr-router"}'
+        values: '1 0 0 0 0 0 0 0 0 0'
+    promql_expr_test:
+      - expr: ALERTS{alertname="FrrExporterDown", alertstate="firing"}
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="FrrExporterDown", alertstate="firing", job="frr-router", instance="frr-router", severity="critical"}'
+            value: 1
+
+  # 5. 15 分钟内断开 3 次 → 立即触发（无 for）
+  - interval: 1m
+    input_series:
+      - series: 'frr_bgp_peer_connections_dropped_total{job="frr-router", instance="frr-router", peer="10.10.10.12"}'
+        values: '0x5 1 1 2 2 3 3 3 3 3 3 3'
+    promql_expr_test:
+      - expr: ALERTS{alertname="FrrBgpPeerFlapping", alertstate="firing"}
+        eval_time: 15m
+        exp_samples:
+          - labels: 'ALERTS{alertname="FrrBgpPeerFlapping", alertstate="firing", job="frr-router", instance="frr-router", peer="10.10.10.12", severity="warning"}'
+            value: 1

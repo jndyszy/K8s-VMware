@@ -1,0 +1,21 @@
+# 阶段 4 验收资源：用 lab-api 演示 externalTrafficPolicy: Local 下的 ECMP
+# 只有运行 lab-api Pod 的节点宣告 10.200.0.20/32，路由器上该 /32 的下一跳数 = 有 Pod 的节点数；
+# Local 模式下节点只把流量交给本机 Pod，lab-api 返回的 hostname 就能反映 ECMP 选了哪条路径，客户端源 IP 也得以保留。
+# 不放进 apps/（不由 ArgoCD 管理），验收后可删除：kubectl delete -f tests/stage4/lab-api-lb-local.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab-api-lb-local
+  namespace: lab
+  annotations:
+    projectcalico.org/loadBalancerIPs: '["10.200.0.20"]'
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app: lab-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

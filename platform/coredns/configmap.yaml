@@ -8,6 +8,7 @@
 #
 # 应用：kubectl apply --server-side --force-conflicts -f platform/coredns/configmap.yaml
 #       kubectl -n kube-system rollout restart deploy/coredns
+# 阶段 4：lab.internal 单独一个 server 块，转发给 OpenWrt dnsmasq（10.10.10.20），Pod 内可解析 grafana.lab.internal 等名字。
 # 注意：kubeadm upgrade 可能把 Corefile 重置为默认值，升级后需重新应用本文件。
 apiVersion: v1
 kind: ConfigMap
@@ -38,4 +39,9 @@ data:
         loop
         reload
         loadbalance
+    }
+    lab.internal:53 {
+        errors
+        cache 30
+        forward . 10.10.10.20
     }

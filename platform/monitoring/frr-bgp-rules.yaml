@@ -1,0 +1,61 @@
+# 阶段 4.7：frr-router BGP 告警规则
+# 指标来自 network/openwrt/bgp-metrics.cgi；规则测试：tests/stage4/frr-bgp-rules.test.yaml
+# 验证：scripts/extract-prom-rules.sh platform/monitoring/frr-bgp-rules.yaml > tests/stage4/frr-bgp-rules.prom.yaml
+#       promtool test rules tests/stage4/frr-bgp-rules.test.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: frr-bgp
+  namespace: monitoring
+spec:
+  groups:
+    - name: frr-bgp
+      rules:
+        - alert: FrrExporterDown
+          # 抓不到指标（路由器宕机、uhttpd 停止）或 vtysh 无输出（bgpd 停止）
+          expr: up{job="frr-router"} == 0 or frr_bgp_up == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: frr-router BGP 指标不可用
+            description: Prometheus 抓不到 frr-router 的 BGP 指标，或 vtysh 没有返回 BGP 摘要。路由器或 bgpd 可能已停止。
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage4-network.md#bgp-监控与告警
+        - alert: FrrBgpPeerDown
+          # 9 秒保持时间到期后会话即断开；for 30s 过滤一次性抖动（如修改 BGPFilter 引起的 1–2 秒重建）
+          expr: frr_bgp_peer_up == 0
+          for: 30s
+          labels:
+            severity: critical
+          annotations:
+            summary: BGP 邻居 {{ $labels.peer }} 断开
+            description: frr-router 与 {{ $labels.peer }}（AS {{ $labels.remote_as }}）的 BGP 会话已断开超过 30 秒，该节点不再承载 LoadBalancer 流量。
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage4-network.md#bgp-监控与告警
+        - alert: FrrBgpPeerNoPrefixes
+          # 会话正常但一条路由都没收到：Calico 出口过滤、路由器入方向策略或 IPPool 配置有误
+          expr: frr_bgp_peer_up == 1 and on (peer) frr_bgp_peer_prefixes_received == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: BGP 邻居 {{ $labels.peer }} 没有宣告任何路由
+            description: 会话为 Established，但经入方向策略后收到的前缀数为 0，检查 BGPFilter、route-map K8S-IN 与 serviceLoadBalancerIPs。
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage4-network.md#bgp-监控与告警
+        - alert: FrrLoadBalancerEcmpDegraded
+          # 3 台 worker 都应宣告 LB 地址池；少于 3 条下一跳说明 ECMP 宽度下降，剩余节点负载升高
+          expr: frr_route_nexthops{prefix="10.200.0.0/24"} < 3
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: LB 地址池 ECMP 路径数下降到 {{ $value }}
+            description: frr-router 内核 FIB 中 {{ $labels.prefix }} 的下一跳少于 3 条。
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage4-network.md#bgp-监控与告警
+        - alert: FrrBgpPeerFlapping
+          expr: increase(frr_bgp_peer_connections_dropped_total[15m]) >= 3
+          labels:
+            severity: warning
+          annotations:
+            summary: BGP 邻居 {{ $labels.peer }} 频繁重建
+            description: 15 分钟内会话断开 {{ $value | humanize }} 次，检查链路、节点负载与 calico-node 日志。
+            runbook_url: https://github.com/jndyszy/K8s-VMware/blob/main/docs/stage4-network.md#bgp-监控与告警

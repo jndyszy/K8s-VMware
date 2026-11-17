@@ -1,0 +1,106 @@
+# 阶段 4.7：frr-router BGP 仪表盘，Grafana sidecar 自动加载带 grafana_dashboard 标签的 ConfigMap
+# 指标来自 network/openwrt/bgp-metrics.cgi（ScrapeConfig frr-router）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frr-bgp-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  frr-bgp.json: |
+    {
+      "uid": "frr-bgp",
+      "title": "frr-router / BGP",
+      "tags": ["network", "bgp"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "15s",
+      "time": {"from": "now-1h", "to": "now"},
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "数据源",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {"text": "Prometheus", "value": "prometheus"},
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Established 邻居",
+          "description": "frr-router 与 3 台 worker 的 eBGP 会话中处于 Established 的数量，应为 3。",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+          "targets": [{"refId": "A", "datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum(frr_bgp_peer_up)", "instant": true}],
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"},
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 1}, {"color": "green", "value": 3}]}}, "overrides": []}
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "LB 地址池 ECMP 路径数",
+          "description": "10.200.0.0/24 在 frr-router 内核 FIB 中的下一跳数，应为 3。",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+          "targets": [{"refId": "A", "datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "frr_route_nexthops{prefix=\"10.200.0.0/24\"}", "instant": true}],
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"},
+          "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 1}, {"color": "green", "value": 3}]}}, "overrides": []}
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "会话持续时间",
+          "description": "每个邻居本次 Established 至今的时间，突然归零说明会话重建过。",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 5, "w": 12, "x": 12, "y": 0},
+          "targets": [{"refId": "A", "datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "frr_bgp_peer_uptime_seconds", "legendFormat": "{{peer}}", "instant": true}],
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "none", "graphMode": "none", "textMode": "value_and_name"},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        },
+        {
+          "id": 4,
+          "type": "state-timeline",
+          "title": "邻居状态",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 7, "w": 24, "x": 0, "y": 5},
+          "targets": [{"refId": "A", "datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "frr_bgp_peer_up", "legendFormat": "{{peer}}"}],
+          "options": {"showValue": "never", "mergeValues": true},
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{"type": "value", "options": {"0": {"text": "Down", "color": "red"}, "1": {"text": "Established", "color": "green"}}}],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "收到的前缀数",
+          "description": "经 route-map K8S-IN 过滤后接受的前缀。每台 worker：本机 Pod 地址块 + LB /24，运行 Local 服务后端的节点再加对应 /32。",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "targets": [{"refId": "A", "datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "frr_bgp_peer_prefixes_received", "legendFormat": "{{peer}}"}],
+          "fieldConfig": {"defaults": {"decimals": 0, "custom": {"lineInterpolation": "stepAfter"}}, "overrides": []}
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "ECMP 路径数与会话断开次数",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "targets": [
+            {"refId": "A", "datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "frr_route_nexthops", "legendFormat": "下一跳 {{prefix}}"},
+            {"refId": "B", "datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "increase(frr_bgp_peer_connections_dropped_total[5m])", "legendFormat": "5 分钟断开 {{peer}}"}
+          ],
+          "fieldConfig": {"defaults": {"decimals": 0, "custom": {"lineInterpolation": "stepAfter"}}, "overrides": []}
+        }
+      ]
+    }

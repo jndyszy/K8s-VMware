@@ -1,0 +1,14 @@
+# 阶段 4：只向路由器宣告本节点自己产生的路由（本机 Pod 地址块、本机宣告的 LB IP）
+# 原因：Calico 对外部邻居启用 ADD-PATH，会把经节点间 iBGP 学到的其他节点路由（含 master）一并转发给路由器。
+# 后果一：master（.10）作为 LB 地址池的下一跳进入 ECMP 数据路径，违背"master 不承载业务流量"。
+# 后果二：某台 worker 宕机时，其余 worker 仍在转发以它为下一跳的路径，要等节点间 iBGP 超时才撤销，
+#         路由器侧 timers 3 9 的快速收敛失效。
+# 过滤后路由器上每条路径都只来自"下一跳本人"的 BGP 会话，会话断开即撤销。
+apiVersion: projectcalico.org/v3
+kind: BGPFilter
+metadata:
+  name: export-local-only
+spec:
+  exportV4:
+    - action: Reject
+      source: RemotePeers
