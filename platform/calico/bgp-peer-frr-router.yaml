@@ -1,0 +1,11 @@
+# 阶段 4：Calico 与 OpenWrt/FRR（10.10.10.20，AS 64500）的 eBGP 邻居
+# 只在 worker 上建立：master 带污点不承载业务流量，不进入 LoadBalancer 的 ECMP 数据路径。
+# 路由器侧配置见 network/openwrt/frr.conf（只接收 LB 地址池与 Pod 网段，不向集群宣告路由）。
+apiVersion: projectcalico.org/v3
+kind: BGPPeer
+metadata:
+  name: frr-router
+spec:
+  peerIP: 10.10.10.20
+  asNumber: 64500
+  nodeSelector: has(node-role.kubernetes.io/worker)

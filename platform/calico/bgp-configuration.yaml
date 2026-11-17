@@ -1,0 +1,13 @@
+# 阶段 4：Calico 全局 BGP 配置
+# 显式写出 AS 号和节点间 iBGP 全互联（此前全部是默认值），4.4 在这里追加 serviceLoadBalancerIPs。
+# 下面后三项是 operator 已写入的现有值，原样保留。
+apiVersion: projectcalico.org/v3
+kind: BGPConfiguration
+metadata:
+  name: default
+spec:
+  asNumber: 64512
+  nodeToNodeMeshEnabled: true
+  logSeverityScreen: Info
+  programClusterRoutes: EnabledNoEncapOnly
+  serviceLoadBalancerAggregation: Enabled
