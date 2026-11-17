@@ -1,7 +1,7 @@
 # 阶段 4：Calico 与 OpenWrt/FRR（10.10.10.20，AS 64500）的 eBGP 邻居
 # 只在 worker 上建立：master 带污点不承载业务流量，不进入 LoadBalancer 的 ECMP 数据路径。
-# keepOriginalNextHop：Calico 默认把经节点间 iBGP 学到的其他节点 Pod 地址块也转发给路由器，并把下一跳改成自己，
-# 路由器因此对每个地址块都装 3 条等价路由，流量可能多绕一跳；保留原始下一跳后，每个地址块只指向真正承载它的节点。
+# filters：只宣告本节点产生的路由（见 bgp-filter-local-only.yaml）。最初用 keepOriginalNextHop 修正下一跳，
+# 但 ADD-PATH 仍会把 master 和其他节点的路径带给路由器，改为在出口直接过滤。
 # 路由器侧配置见 network/openwrt/frr.conf（只接收 LB 地址池与 Pod 网段，不向集群宣告路由）。
 apiVersion: projectcalico.org/v3
 kind: BGPPeer
@@ -11,4 +11,5 @@ spec:
   peerIP: 10.10.10.20
   asNumber: 64500
   nodeSelector: has(node-role.kubernetes.io/worker)
-  keepOriginalNextHop: true
+  filters:
+    - export-local-only
