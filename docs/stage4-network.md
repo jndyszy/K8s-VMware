@@ -350,8 +350,8 @@ ansible-playbook openwrt.yml             # 应用；再执行一次应为 change
 frr.conf 等文件无差异，BGP 未受影响（`established=3`、`lb_nexthops=3`）。第二次执行 `changed=0`。
 Mac（`dscacheutil`）、节点（`resolvectl`）、路由器上 lab.internal 解析均正常。
 
-配置漂移演示：路由器上手工 `uci set dropbear.@dropbear[0].PasswordAuth='on'; uci commit dropbear`，
-`--check` 报告 `CHANGED: dropbear.@dropbear[0].PasswordAuth 'on' -> 'off'`，正式执行即修正。
+配置漂移演示（可选，未在本次记录中执行）：路由器上手工 `uci set dropbear.@dropbear[0].PasswordAuth='on'; uci commit dropbear`，
+`--check` 应报告 `CHANGED: dropbear.@dropbear[0].PasswordAuth 'on' -> 'off'`，正式执行即修正。
 
 ## 踩坑记录
 
