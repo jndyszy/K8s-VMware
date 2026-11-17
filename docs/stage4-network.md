@@ -263,6 +263,62 @@ systemctl restart systemd-resolved
 路由器 `service dnsmasq stop` 后：节点 `resolvectl query github.com` 照常解析，`grafana.lab.internal` 失败；`service dnsmasq start` 恢复。
 故障只影响内部域名——这是 split DNS 相对"主 .20、备 .2"的优势（后者还要等主 DNS 超时，且有环路）。
 
+## 4.7 BGP 监控与告警
+
+OpenWrt 没有 Python，原计划"Python 自写 exporter，SSH 登录路由器执行 vtysh"需要新镜像、Deployment，还要把路由器 root 私钥放进集群。
+改为**在路由器上用设备原生能力实现 exporter**：uhttpd 以 CGI 方式执行 [`bgp-metrics.cgi`](../network/openwrt/bgp-metrics.cgi)
+（ash + OpenWrt 自带的 jshn 解析 `show bgp ipv4 unicast summary json`），Prometheus 直接拉取。零新增组件，凭据不离开路由器，只执行只读 show 命令。
+
+```bash
+scp -O network/openwrt/bgp-metrics.cgi frr-router:/www/cgi-bin/bgp-metrics          # Mac
+chmod 755 /www/cgi-bin/bgp-metrics && echo /www/cgi-bin/bgp-metrics >> /etc/sysupgrade.conf   # 路由器
+kubectl apply -f platform/monitoring/frr-router-scrapeconfig.yaml \
+  -f platform/monitoring/frr-bgp-rules.yaml -f platform/monitoring/frr-bgp-dashboard.yaml     # master
+```
+
+| 指标 | 含义 |
+| --- | --- |
+| `frr_bgp_up` | vtysh 是否返回 BGP 摘要（bgpd 是否存活） |
+| `frr_bgp_peer_up{peer,remote_as}` | 会话是否 Established |
+| `frr_bgp_peer_info{peer,remote_as,state}` | 会话状态（值恒为 1，状态在标签里） |
+| `frr_bgp_peer_prefixes_received{peer}` | 经入方向策略后接受的前缀数 |
+| `frr_bgp_peer_uptime_seconds{peer}` | 本次 Established 持续时间 |
+| `frr_bgp_peer_connections_dropped_total{peer}` | 会话断开累计次数 |
+| `frr_route_nexthops{prefix}` | 关键前缀在内核 FIB 中的下一跳数（ECMP 宽度） |
+
+- [`frr-router-scrapeconfig.yaml`](../platform/monitoring/frr-router-scrapeconfig.yaml)：Prometheus Operator 的 `ScrapeConfig` 用于抓集群外静态目标，
+  标签 `release: kps` 匹配现有 `scrapeConfigSelector`，不用改 Helm values。
+- jshn 会把键名里的 `.` 换成 `_`（`10_10_10_11`），exporter 里还原成 IP。
+
+| 告警 | 条件 | 级别 |
+| --- | --- | --- |
+| `FrrExporterDown` | 抓取失败或 `frr_bgp_up == 0`，持续 1 分钟 | critical |
+| `FrrBgpPeerDown` | 邻居断开超过 30 秒（过滤改 BGPFilter 引起的 1–2 秒重建） | critical |
+| `FrrBgpPeerNoPrefixes` | 会话正常但前缀数为 0，持续 2 分钟（策略写错） | warning |
+| `FrrLoadBalancerEcmpDegraded` | `10.200.0.0/24` 下一跳少于 3，持续 1 分钟 | warning |
+| `FrrBgpPeerFlapping` | 15 分钟内断开 ≥ 3 次 | warning |
+
+规则测试 [`tests/stage4/frr-bgp-rules.test.yaml`](../tests/stage4/frr-bgp-rules.test.yaml)（1 组健康 + 4 组故障，含 pending → firing 时机），
+`promtool test rules` 结果 SUCCESS。查看告警：Grafana → Alerting → Alert rules → Data source-managed → `monitoring/frr-bgp`
+（列表显示规则定义，`{{ $labels.peer }}` 不展开；展开 Instances 看渲染后的内容），或 Explore 查询 `ALERTS{alertname=~"Frr.*"}`。
+
+### 告警演练：管理性关闭 worker-1 邻居
+
+`neighbor 10.10.10.11 shutdown`（等同 H3C `peer ... ignore`，只改运行配置不 `write memory`）。worker-1 上没有 Local 服务后端，业务无影响。
+
+| 时间（UTC+8） | 事件 |
+| --- | --- |
+| 13:37:16 | 路由器发出 `Cease/Administrative Shutdown`，邻居 Down |
+| ≈13:37:30 | 下一次抓取：`frr_bgp_peer_up=0`，`frr_route_nexthops=2` |
+| 13:37:54 | 两条告警进入 pending |
+| 13:38:24 | `FrrBgpPeerDown` firing（距故障约 68 秒） |
+| 13:38:54 | `FrrLoadBalancerEcmpDegraded` firing |
+| 13:47:22 | `no neighbor ... shutdown`，邻居 Up + End-of-RIB |
+| 13:47:54 | 两条告警恢复 |
+
+告警时延构成：抓取间隔 15 秒 + 规则评估间隔 30 秒（chart 默认）+ `for` 30 秒，约 1 分钟。BGP 自身 9 秒收敛，**告警是给人看的，不在业务恢复路径上**；
+如需更快感知可缩短评估间隔，代价是 Prometheus 负载。
+
 ## 踩坑记录
 
 1. **Fusion DNS 让 dnsmasq 解析为空**：见 4.1，上游改为节点 resolved。dnsmasq 日志里的 `refused to do a recursive query` 是线索。
