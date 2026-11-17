@@ -22,7 +22,7 @@
 | frr-router | 10.10.10.20，**OpenWrt**（不是 Ubuntu），单臂路由，只挂 vmnet2，不作为节点默认网关 |
 | Pod CIDR | 10.244.0.0/16（kubeadm podSubnet 与 Calico IPPool 必须一致） |
 | Service CIDR | 10.96.0.0/12 |
-| DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；CoreDNS 上游 = 4 台节点 IP 上的 systemd-resolved（`DNSStubListenerExtra`，见 `platform/coredns/`）；阶段 4 起 split DNS：OpenWrt dnsmasq 只应答 `lab.internal`，节点 resolved 用 `Domains=~lab.internal` 只把该域发给 10.10.10.20，其余仍走 10.10.10.2；Mac 用 `/etc/resolver/lab.internal`；dnsmasq 上游 = 4 台节点上的 resolved |
+| DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；CoreDNS 上游 = 4 台节点 IP 上的 systemd-resolved（`DNSStubListenerExtra`，见 `platform/coredns/`）；阶段 4 起 split DNS：OpenWrt dnsmasq 只应答 `lab.internal`，节点 resolved 用 DNS delegate（`/etc/systemd/dns-delegate.d/lab-internal.dns-delegate`，`Domains=~lab.internal`）只把该域发给 10.10.10.20，其余仍走 10.10.10.2；Mac 用 `/etc/resolver/lab.internal`；dnsmasq 上游 = 4 台节点上的 resolved |
 | LoadBalancer 池 | 10.200.0.0/24（MetalLB 只分配 IP，由 Calico BGP 宣告） |
 | BGP | 集群 AS 64512，OpenWrt/FRR AS 64500 |
 | 容器运行时 | containerd 2.x（Ubuntu 26.04 apt 自带），SystemdCgroup = true，certs.d 目录式配置；配置文件为 2.x 结构（pause 键名 `sandbox`，字符串用单引号），脚本需同时兼容 1.x |
