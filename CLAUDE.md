@@ -22,7 +22,7 @@
 | frr-router | 10.10.10.20，**OpenWrt**（不是 Ubuntu），单臂路由，只挂 vmnet2，不作为节点默认网关 |
 | Pod CIDR | 10.244.0.0/16（kubeadm podSubnet 与 Calico IPPool 必须一致） |
 | Service CIDR | 10.96.0.0/12 |
-| DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；CoreDNS 上游 = 4 台节点 IP 上的 systemd-resolved（`DNSStubListenerExtra`，见 `platform/coredns/`）；阶段 4 起：OpenWrt dnsmasq 提供 `lab.internal` 区域，节点 DNS 主 10.10.10.20、备 10.10.10.2 |
+| DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；CoreDNS 上游 = 4 台节点 IP 上的 systemd-resolved（`DNSStubListenerExtra`，见 `platform/coredns/`）；阶段 4 起 split DNS：OpenWrt dnsmasq 只应答 `lab.internal`，节点 resolved 用 `Domains=~lab.internal` 只把该域发给 10.10.10.20，其余仍走 10.10.10.2；Mac 用 `/etc/resolver/lab.internal`；dnsmasq 上游 = 4 台节点上的 resolved |
 | LoadBalancer 池 | 10.200.0.0/24（MetalLB 只分配 IP，由 Calico BGP 宣告） |
 | BGP | 集群 AS 64512，OpenWrt/FRR AS 64500 |
 | 容器运行时 | containerd 2.x（Ubuntu 26.04 apt 自带），SystemdCgroup = true，certs.d 目录式配置；配置文件为 2.x 结构（pause 键名 `sandbox`，字符串用单引号），脚本需同时兼容 1.x |
@@ -63,13 +63,15 @@ Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**脚本、�
   BGP 监控没有现成 frr_exporter 包，计划用 Python 自写 exporter（SSH 执行 `vtysh -c 'show bgp summary json'`）。
 - **代码与配置分两个仓库**：CI 回写本仓库更新镜像 tag，不会反向触发 lab-api 的流水线。
 - **节点默认网关是 Fusion NAT（.2），不是 OpenWrt**：阶段 0–3 不依赖路由器。
-- **Fusion NAT 的 DNS 不支持 EDNS**：带 EDNS 的查询会收到畸形报文，且不支持 TCP。systemd-resolved 会降级重试，CoreDNS 和
+- **Fusion NAT 的 DNS 不支持 EDNS**：它不是转发器，而是把查询交给 macOS 解析后自己拼应答（flags 只有 `qr aa`，没有 `ra`）。
+  带 EDNS 的查询会收到畸形报文（末尾多 16 字节），且不支持 TCP；与 fake-ip 无关。systemd-resolved 会降级重试，CoreDNS 和
   dnsmasq 不会。所以 CoreDNS 不直接转发给 10.10.10.2，而是转发给各节点 IP 上的 resolved；`kubeadm upgrade` 后要重新应用
-  `platform/coredns/configmap.yaml`；阶段 4 的 dnsmasq 也不能直接以 10.10.10.2 为上游。
+  `platform/coredns/configmap.yaml`；OpenWrt dnsmasq 同样不能以 10.10.10.2 为上游（实测解析为空，日志 `refused to do a recursive query`），上游改为 4 台节点上的 resolved（`noresolv=1` + 4 个 `server`）。
 - **内部 DNS 只做增强，`/etc/hosts` 始终兜底**：`controlPlaneEndpoint` 是 `k8s-master:6443`，kubelet/kube-proxy 每次
   重连都要解析它，DNS 一挂节点就 NotReady。所以节点名永远写在 `/etc/hosts`（nsswitch `files dns`，本地优先），
-  OpenWrt 的 dnsmasq 只提供额外名字（`*.lab.internal`，如 grafana/argocd 指向 LoadBalancer IP），上游转发 10.10.10.2；
-  节点 DNS 配主 .20、备 .2，路由器宕机时仍能解析公网。后缀用 `.internal`（ICANN 2024 年保留给内网），
+  OpenWrt 的 dnsmasq 只提供额外名字（`*.lab.internal`，如 grafana/argocd 指向 LoadBalancer IP）。
+  采用 split DNS 而不是"主 .20、备 .2"：dnsmasq 上游是节点 resolved，主备方案会形成 resolved → dnsmasq → resolved 环路；
+  按域名分流后路由器宕机只影响 `*.lab.internal`，公网解析不经过路由器、也不用等主 DNS 超时。后缀用 `.internal`（ICANN 2024 年保留给内网），
   不用 `.local`（被 mDNS 占用，macOS 解析会出问题）。
 
 ## 编码约定

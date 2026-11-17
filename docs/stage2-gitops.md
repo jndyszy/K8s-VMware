@@ -224,7 +224,7 @@ kubectl -n kube-system rollout restart deploy/coredns
 - 保留 Mac 代理的 fake-ip 解析，其他网络行为不变；CoreDNS 对 4 个上游做健康检查，挂一台不影响。
 - 没选的方案：CoreDNS 直连公网 DNS 会绕过 fake-ip，境外域名可能解析到被污染的地址；转发给 Mac 代理需改代理软件配置，耦合更深。
 - `kubeadm upgrade` 可能重置 Corefile，升级后重新应用 [`platform/coredns/configmap.yaml`](../platform/coredns/configmap.yaml)。
-- 阶段 4 改用 OpenWrt dnsmasq 时同样要规避：dnsmasq 也会把 EDNS 转发给 10.10.10.2。
+- 阶段 4 的 OpenWrt dnsmasq 同样中招（实测解析为空），上游改为节点上的 resolved，节点侧用 split DNS 只把 `lab.internal` 发给路由器，见阶段 4 手册。
 - `scripts/verify-cluster.sh` 新增两项检查：CoreDNS 上游不是 `/etc/resolv.conf`；Pod 内用 `dig`（带 EDNS）解析 `github.com`。修复后验收 13/13 通过。
 
 ## 改进项

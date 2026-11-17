@@ -21,8 +21,8 @@
 - **出口走 Fusion NAT（`.2`），OpenWrt 不当网关**：OpenWrt 单臂旁挂，只负责与集群建 eBGP、学习 Pod / LoadBalancer 路由，
   供 Mac 访问集群服务。阶段 0–3 完全不依赖路由器，路由器故障只影响 BGP 实验。
 - **内部 DNS 只做增强，不做单点**：控制平面地址 `k8s-master:6443` 由每台节点的 `/etc/hosts` 解析，DNS 宕机不会导致节点
-  NotReady；dnsmasq 提供 `grafana.lab.internal`、`argocd.lab.internal` 等指向 LoadBalancer IP 的名字，上游转发 `.2`，
-  节点 DNS 配主 `.20`、备 `.2`。
+  NotReady；dnsmasq 提供 `grafana.lab.internal`、`argocd.lab.internal` 等指向 LoadBalancer IP 的名字，采用 split DNS：
+  只有 `*.lab.internal` 发给 `.20`，其余仍走 `.2`，路由器宕机不影响公网解析。
 
 <!-- 拓扑图放到 docs/images/topology.png 后取消注释 -->
 <!-- ![topology](docs/images/topology.png) -->
