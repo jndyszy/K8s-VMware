@@ -232,7 +232,7 @@ done
 uci commit dhcp; service dnsmasq restart
 ```
 
-完整配置快照：[`network/openwrt/dhcp.uci`](../network/openwrt/dhcp.uci)。
+4.7 起记录改为 [`network/openwrt/lab-internal.hosts`](../network/openwrt/lab-internal.hosts)（dnsmasq `addn-hosts`），由 Ansible 推送，上面的 uci domain 段会被清理。
 
 ### 节点：DNS delegate，而不是 resolved.conf 的全局 DNS=
 
