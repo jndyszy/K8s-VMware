@@ -1,0 +1,17 @@
+# 阶段 4：LoadBalancer 地址池（Calico 原生 LB IPAM，替代 MetalLB）
+# allowedUses 只含 LoadBalancer：Pod 不会从这里分到地址；calico-kube-controllers 的 loadBalancer 控制器
+# （assignIPs: AllServices）自动给 type: LoadBalancer 的 Service 分配 IP，
+# 宣告由 bgp-configuration.yaml 的 serviceLoadBalancerIPs 负责。
+apiVersion: projectcalico.org/v3
+kind: IPPool
+metadata:
+  name: loadbalancer-ipv4
+spec:
+  cidr: 10.200.0.0/24
+  allowedUses:
+    - LoadBalancer
+  assignmentMode: Automatic
+  ipipMode: Never
+  vxlanMode: Never
+  natOutgoing: false
+  disabled: false

@@ -1,6 +1,7 @@
 # 阶段 4：Calico 全局 BGP 配置
-# 显式写出 AS 号和节点间 iBGP 全互联（此前全部是默认值），4.4 在这里追加 serviceLoadBalancerIPs。
-# 下面后三项是 operator 已写入的现有值，原样保留。
+# 显式写出 AS 号和节点间 iBGP 全互联（此前全部是默认值）；logSeverityScreen 等三项是 operator 已写入的现有值，原样保留。
+# serviceLoadBalancerIPs：向 BGP 邻居宣告 LB 地址池。externalTrafficPolicy: Cluster 的服务由所有节点宣告整个 /24
+# （serviceLoadBalancerAggregation: Enabled）；Local 的服务只由有后端 Pod 的节点宣告 /32。
 apiVersion: projectcalico.org/v3
 kind: BGPConfiguration
 metadata:
@@ -11,3 +12,5 @@ spec:
   logSeverityScreen: Info
   programClusterRoutes: EnabledNoEncapOnly
   serviceLoadBalancerAggregation: Enabled
+  serviceLoadBalancerIPs:
+    - cidr: 10.200.0.0/24

@@ -1,0 +1,21 @@
+# 阶段 4：Grafana 的 LoadBalancer 入口（固定 IP 10.200.0.10，4.6 起解析为 grafana.lab.internal）
+# 单独建 Service 而不改 Helm values：chart 自带的 kps-grafana 保持 ClusterIP，升级 chart 不影响对外入口。
+# externalTrafficPolicy: Cluster：3 台 worker 都宣告地址池，路由器 ECMP 到任一节点，再由 kube-proxy 转到 Grafana Pod。
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-lb
+  namespace: monitoring
+  annotations:
+    projectcalico.org/loadBalancerIPs: '["10.200.0.10"]'
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/instance: kps
+    app.kubernetes.io/name: grafana
+  ports:
+    - name: http
+      port: 80
+      targetPort: grafana
+      protocol: TCP
