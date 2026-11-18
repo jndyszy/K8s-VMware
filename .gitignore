@@ -19,6 +19,9 @@ join-command.sh
 *.tfvars
 !*.tfvars.example
 crash.log
+# 保存的执行计划可能含敏感值（如 sensitive 输出）
+*.tfplan
+tfplan
 .terraform.lock.hcl.bak
 
 # ===== 本地环境与密钥 =====
