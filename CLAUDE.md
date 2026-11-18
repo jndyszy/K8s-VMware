@@ -24,8 +24,9 @@
 | Service CIDR | 10.96.0.0/12 |
 | DNS | 阶段 0–3：节点 DNS = 10.10.10.2（Fusion NAT），节点名由 `/etc/hosts` 解析；CoreDNS 上游 = 4 台节点 IP 上的 systemd-resolved（`DNSStubListenerExtra`，见 `platform/coredns/`）；阶段 4 起 split DNS：OpenWrt dnsmasq 只应答 `lab.internal`，节点 resolved 用 DNS delegate（`/etc/systemd/dns-delegate.d/lab-internal.dns-delegate`，`Domains=~lab.internal`）只把该域发给 10.10.10.20，其余仍走 10.10.10.2；Mac 用 `/etc/resolver/lab.internal`；dnsmasq 上游 = 4 台节点上的 resolved |
 | LoadBalancer 池 | 10.200.0.0/24，Calico 原生 LB IPAM（IPPool `loadbalancer-ipv4`，`allowedUses: [LoadBalancer]`），由 `BGPConfiguration.serviceLoadBalancerIPs` 宣告；未使用 MetalLB；固定 IP 用注解 `projectcalico.org/loadBalancerIPs`（grafana .10、argocd .11、lab-api 验收 .20） |
-| BGP 拓扑 | 只有 3 台 worker 与 frr-router 建 eBGP（BGPPeer `nodeSelector`），master 不进 LB 数据路径；BGPFilter `export-local-only` 只宣告本节点路由；FRR `timers 3 9`、`maximum-paths 8`、出方向全拒；Mac 访问需一次性 `sudo route -n add -net 10.200.0.0/24 10.10.10.20` |
-| BGP | 集群 AS 64512，OpenWrt/FRR AS 64500 |
+| BGP 拓扑 | 只有 3 台 worker 与 frr-router 建 eBGP（BGPPeer `nodeSelector`），master 不进 LB 数据路径；BGPFilter `export-local-only` 只宣告本节点路由；FRR `timers 3 9`、`maximum-paths 8`、出方向只放行云上网段 172.16.0.0/12；Mac 访问需一次性 `sudo route -n add -net 10.200.0.0/24 10.10.10.20` |
+| BGP | 集群 AS 64512，OpenWrt/FRR AS 64500，阿里云 ECS AS 64600 |
+| 混合云（阶段 5） | 阿里云杭州 VPC 172.16.0.0/12；年付 ECS `aliyun-edge`（Ubuntu 26.04 x86_64，Mac 上 `ssh aliyun-edge`）为云上边界路由器；WireGuard 隧道 10.255.255.0/30（路由器 .1 主动发起，ECS .2 监听 UDP 51820，`Table = off`）；隧道上 eBGP `timers 10 30`；路由器向集群只宣告 172.16.0.0/12；ECS 对 BGP 路由 `set src` 为 VPC 地址；Terraform（`terraform/`，alicloud provider 2.2.0，OSS 远程 state）只管安全组规则与 VPC 路由，ECS/VPC 用 data 只读引用；凭据用 `ALIBABA_CLOUD_*` 环境变量（OSS backend 另需 `ALICLOUD_*`）；ECS 公网 IP、账号 ID 不进仓库，文档写 203.0.113.10 |
 | 容器运行时 | containerd 2.x（Ubuntu 26.04 apt 自带），SystemdCgroup = true，certs.d 目录式配置；配置文件为 2.x 结构（pause 键名 `sandbox`，字符串用单引号），脚本需同时兼容 1.x |
 | CNI | Calico（Tigera Operator），BGP 直接路由，encapsulation: None |
 | 镜像仓库 | **公网** Harbor，域名访问，Let's Encrypt 证书（系统根证书即可信任，不分发 CA） |
@@ -49,7 +50,7 @@ Harbor 域名在脚本中通过环境变量 `HARBOR_HOST` 传入，**脚本、�
 - [x] 阶段 2：lab-api、GitHub Actions、ArgoCD（push lab-api → CI 构建推送 Harbor → 写回 newTag → ArgoCD 自动部署，见 docs/stage2-gitops.md）
 - [x] 阶段 3：kube-prometheus-stack、告警、SLO、集中日志（可用性 99.5% / 延迟 99%@250ms，多窗口燃烧率告警，故障演练，Loki + Alloy，见 docs/stage3-observability.md）
 - [x] 阶段 4：OpenWrt + FRR 与 Calico eBGP、ECMP、内部 DNS（lab.internal）、网络自动化（verify-network.sh 29/29，故障演练 9 秒收敛，见 docs/stage4-network.md）
-- [ ] 阶段 5：Terraform 公有云
+- [x] 阶段 5：Terraform + 混合云 BGP（阿里云 VPC ↔ 实验网，WireGuard + eBGP，verify-hybrid.sh 18/18，隧道故障演练，见 docs/stage5-hybrid-cloud.md）
 
 完成一个阶段后，更新这里和 README 的进度表。
 
@@ -108,8 +109,8 @@ scripts/      节点与集群的初始化、验收脚本
 kubeadm/      kubeadm 配置
 platform/     平台组件（calico、coredns、metrics-server、monitoring、logging、argocd）
 apps/         ArgoCD 管理的应用（阶段 2 起）
-network/      OpenWrt 配置（openwrt/）、Ansible（ansible/）（阶段 4）
-terraform/    阶段 5
+network/      OpenWrt 配置（openwrt/）、Ansible（ansible/）（阶段 4）、阿里云 ECS 上的 WireGuard/FRR（aliyun/）（阶段 5）
+terraform/    阶段 5：bootstrap（OSS state 桶）、hybrid（VPC 侧资源）
 tests/        各阶段验收资源
 docs/         实验手册 plan.md、复盘 postmortems/、截图 images/
 ```

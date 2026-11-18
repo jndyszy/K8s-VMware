@@ -36,7 +36,7 @@
 | 2 | Go 服务 lab-api、GitHub Actions、Harbor、ArgoCD GitOps（[手册](docs/stage2-gitops.md)） | ✅ |
 | 3 | kube-prometheus-stack、告警、SLI/SLO、错误预算、Loki 集中日志（[手册](docs/stage3-observability.md)） | ✅ |
 | 4 | OpenWrt/FRR + Calico BGP、LoadBalancer IP 宣告与 ECMP、内部 DNS、BGP 监控、Ansible（[手册](docs/stage4-network.md)） | ✅ |
-| 5 | Terraform 公有云 VPC/ECS | ⬜ |
+| 5 | Terraform + 混合云 BGP：阿里云 VPC ↔ 实验网（WireGuard、eBGP、OSS 远程 state）（[手册](docs/stage5-hybrid-cloud.md)） | ✅ |
 | — | 故障演练与复盘（[docs/postmortems](docs/postmortems)） | ⬜ |
 
 ## 目录结构

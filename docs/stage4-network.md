@@ -395,4 +395,4 @@ Mac（`dscacheutil`）、节点（`resolvectl`）、路由器上 lab.internal �
 
 ## 下一步
 
-阶段 5：Terraform 公有云。
+阶段 5：Terraform + 混合云 BGP（[stage5-hybrid-cloud.md](stage5-hybrid-cloud.md)）。
