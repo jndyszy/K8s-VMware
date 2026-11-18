@@ -2,6 +2,8 @@
 
 在 32GB Apple Silicon MacBook 上用 **VMware Fusion** 搭建 1 Master + 3 Worker 的 kubeadm 集群，并把容器网络、CI/CD、GitOps、可观测性与 SLO、BGP 网络自动化、Terraform 串成一个完整的云原生实验项目。
 
+> 第一次来？先读 [项目总览](docs/overview.md)：全景图、六个阶段的交付与验收数据、关键设计决策，5 分钟读完。
+
 ## 架构
 
 | 组件 | 说明 |
