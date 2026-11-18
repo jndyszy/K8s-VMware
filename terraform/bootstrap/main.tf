@@ -15,7 +15,7 @@ terraform {
   }
 }
 
-# 凭据从环境变量 ALICLOUD_ACCESS_KEY / ALICLOUD_SECRET_KEY 读取，不写进任何文件
+# 凭据从环境变量 ALIBABA_CLOUD_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_SECRET 读取（provider 2.x 已不再认 ALICLOUD_*），不写进任何文件
 provider "alicloud" {
   region = var.region
 }
