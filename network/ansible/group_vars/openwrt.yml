@@ -1,5 +1,5 @@
 # 阶段 4.7：frr-router 期望状态。文件内容在 network/openwrt/，这里只描述"放到哪里、改了之后做什么"。
-# 网络接口（network.lan.*）不在这里管理：Ansible 要靠 10.10.10.20 才能连上路由器，改错地址会把自己锁在外面，
+# 网络接口（network.lan.*、network.wg0 含 WireGuard 私钥）不在这里管理：Ansible 要靠 10.10.10.20 才能连上路由器，改错地址会把自己锁在外面，
 # 接口配置在 4.1 由控制台一次性完成（见 docs/stage4-network.md）。
 
 openwrt_packages:
@@ -23,6 +23,7 @@ openwrt_sysupgrade_keep:
   - /etc/sysctl.d/90-lab-router.conf
   - /www/cgi-bin/bgp-metrics
   - /etc/lab-internal.hosts
+  - /etc/wireguard/          # 阶段 5：WireGuard 密钥（只在路由器本机，不进仓库）
 
 # uci 期望值：按配置包分组，任何一项不同就修改、commit 并触发对应 handler
 openwrt_uci:
@@ -44,6 +45,12 @@ openwrt_uci:
       # dnsmasq 上游 = 4 台节点 IP 上的 systemd-resolved（Fusion NAT DNS 处理不了 EDNS）
       dhcp.@dnsmasq[0].server: [10.10.10.10, 10.10.10.11, 10.10.10.12, 10.10.10.13]
       dhcp.@dnsmasq[0].addnhosts: [/etc/lab-internal.hosts]
+  firewall:
+    handler: reload firewall
+    options: {}
+    lists:
+      # 阶段 5：WireGuard 隧道 wg0 与 lan 同区域（隧道上跑 BGP，并在实验网与云之间转发）
+      firewall.@zone[0].network: [lan, wg0]
   dropbear:
     handler: restart dropbear
     options:

@@ -154,6 +154,10 @@
       ansible.builtin.raw: /etc/init.d/dnsmasq reload
       when: not ansible_check_mode and 'reload dnsmasq' in file_handlers and 'restart dnsmasq' not in uci_handlers
 
+    - name: 重载防火墙
+      ansible.builtin.raw: /etc/init.d/firewall reload
+      when: not ansible_check_mode and 'reload firewall' in uci_handlers
+
     - name: 重启 dropbear
       ansible.builtin.raw: /etc/init.d/dropbear restart
       when: not ansible_check_mode and 'restart dropbear' in uci_handlers

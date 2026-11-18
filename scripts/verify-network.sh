@@ -33,15 +33,21 @@ for h in frr-router $NODES; do
 done
 
 echo "== 路由器：BGP =="
-n=$(rt "vtysh -c 'show bgp ipv4 unicast summary json' | jsonfilter -e '@.peers[*].state' | grep -c Established")
-if [ "$n" = "3" ]; then ok "3 个 eBGP 邻居 Established"; else bad "Established 邻居 ${n}/3"; fi
+# 只统计与集群（AS 64512）的邻居；阶段 5 的云上邻居（AS 64600）由 verify-hybrid.sh 检查
+n=$(rt "vtysh -c 'show bgp ipv4 unicast summary json' | jsonfilter -e '@.peers[@.remoteAs=64512].state' | grep -c Established")
+if [ "$n" = "3" ]; then ok "与 3 台 worker 的 eBGP 邻居 Established"; else bad "worker 邻居 Established ${n}/3"; fi
 zero=$(rt "vtysh -c 'show bgp ipv4 unicast summary json' | jsonfilter -e '@.peers[*].pfxRcd' | grep -cx 0")
 if [ "$zero" = "0" ]; then ok "每个邻居都收到前缀"; else bad "${zero} 个邻居收到 0 条前缀（检查 BGPFilter 与 route-map K8S-IN）"; fi
 nh=$(rt "ip route show 10.200.0.0/24 | awk '/nexthop via/ {print \$3}' | sort | tr '\n' ' '")
 if [ "$nh" = "10.10.10.11 10.10.10.12 10.10.10.13 " ]; then ok "LB 地址池 3 路 ECMP，下一跳只有 3 台 worker"
 else bad "10.200.0.0/24 下一跳为 [${nh}]，期望 [10.10.10.11 10.10.10.12 10.10.10.13]"; fi
-sent=$(rt "vtysh -c 'show bgp ipv4 unicast summary json' | jsonfilter -e '@.peers[*].pfxSnt' | tr '\n' ' '")
-if [ "$sent" = "0 0 0 " ]; then ok "路由器不向集群宣告路由（PfxSnt 全为 0）"; else bad "PfxSnt = [${sent}]，期望 [0 0 0]（检查 route-map K8S-OUT）"; fi
+# 阶段 5 起路由器向集群只宣告云上 VPC 网段（172.16.0.0/12）；隧道未建时什么都不宣告
+leak=""
+for w in 10.10.10.11 10.10.10.12 10.10.10.13; do
+  adv=$(rt "vtysh -c 'show bgp ipv4 unicast neighbors $w advertised-routes' | awk '/^ *\\*>/ {print \$2}'" | grep -vx '172.16.0.0/12' | tr '\n' ' ')
+  [ -n "$adv" ] && leak="${leak}${w}: ${adv}; "
+done
+if [ -z "$leak" ]; then ok "路由器向集群只宣告云上网段（或不宣告）"; else bad "路由器向集群宣告了多余的路由：${leak}（检查 route-map K8S-OUT）"; fi
 check "ECMP 按四元组哈希（fib_multipath_hash_policy=1）" \
   bash -c "$SSH frr-router 'sysctl -n net.ipv4.fib_multipath_hash_policy' | grep -qx 1"
 check "已关闭 ICMP 重定向（eth0 send_redirects=0）" \
