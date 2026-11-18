@@ -45,6 +45,8 @@ resource "alicloud_oss_bucket" "tfstate" {
   }
 }
 
+# 下面 4 个桶配置资源用 depends_on 串行执行：OSS 不允许同时修改同一个桶的配置，
+# 并行创建会报 409 ConcurrentUpdateBucketFailed（首次 apply 时实际遇到过）。
 resource "alicloud_oss_bucket_acl" "tfstate" {
   bucket = alicloud_oss_bucket.tfstate.bucket
   acl    = "private"
@@ -53,17 +55,23 @@ resource "alicloud_oss_bucket_acl" "tfstate" {
 resource "alicloud_oss_bucket_public_access_block" "tfstate" {
   bucket              = alicloud_oss_bucket.tfstate.bucket
   block_public_access = true
+
+  depends_on = [alicloud_oss_bucket_acl.tfstate]
 }
 
 # 版本控制：state 被写坏或误删时可以回滚到上一个版本
 resource "alicloud_oss_bucket_versioning" "tfstate" {
   bucket = alicloud_oss_bucket.tfstate.bucket
   status = "Enabled"
+
+  depends_on = [alicloud_oss_bucket_public_access_block.tfstate]
 }
 
 resource "alicloud_oss_bucket_server_side_encryption" "tfstate" {
   bucket        = alicloud_oss_bucket.tfstate.bucket
   sse_algorithm = "AES256"
+
+  depends_on = [alicloud_oss_bucket_versioning.tfstate]
 }
 
 output "bucket" {
